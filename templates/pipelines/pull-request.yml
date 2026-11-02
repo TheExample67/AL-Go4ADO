@@ -45,6 +45,13 @@ parameters:
 - name: useArtifactCache
   type: boolean
   default: true
+- name: codeAnalysisShell   # pwsh processes large error logs ~5x faster than Windows PowerShell (4000 issues: 1.5 vs 8 min)
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: advancedSecurity
+  type: boolean
+  default: false
 - name: buildTimeoutInMinutes
   type: number
   default: 360
@@ -95,3 +102,13 @@ stages:
       timeoutInMinutes: ${{ parameters.buildTimeoutInMinutes }}
       lfs: ${{ parameters.lfs }}
       submodules: ${{ parameters.submodules }}
+
+  - template: /templates/jobs/code-analysis.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.codeAnalysisShell }}
+      pool: ${{ parameters.initPool }}
+      maxBuildDepth: ${{ parameters.maxBuildDepth }}
+      advancedSecurity: ${{ parameters.advancedSecurity }}

@@ -225,3 +225,16 @@ Describe 'Test-AdoReservedVariableName' {
         Test-AdoReservedVariableName 'Country' | Should -BeTrue
     }
 }
+
+Describe 'ConvertTo-AdoDeliveryMatrix' {
+    It 'creates one matrix entry per delivery target' {
+        $m = ConvertTo-AdoDeliveryMatrix -DeliveryTargetsJson '["NuGet","Storage","My-Target"]'
+        @($m.Keys) | Should -Be @('NuGet', 'Storage', 'My_Target')
+        $m['My_Target'].deliveryTarget | Should -Be 'My-Target'
+    }
+
+    It 'returns an empty matrix for no targets' {
+        (ConvertTo-AdoDeliveryMatrix -DeliveryTargetsJson '[]').Count | Should -Be 0
+        (ConvertTo-AdoDeliveryMatrix -DeliveryTargetsJson '').Count | Should -Be 0
+    }
+}

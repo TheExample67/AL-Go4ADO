@@ -1,0 +1,88 @@
+# Code analysis job: turns the AL compiler error logs of all build jobs into a SARIF file
+# (AL-Go's ProcessALCodeAnalysisLogs) and publishes it in Azure DevOps:
+#   - build summary with the issues per severity, rule, app folder and file
+#   - pipeline artifact 'CodeAnalysisLogs' (shown as "Scans" tab by the SARIF SAST Scans Tab extension)
+#   - optionally Advanced Security alerts (advancedSecurity: true, requires GitHub Advanced Security for Azure DevOps)
+# Runs when the AL-Go setting trackALAlertsInGitHub is true (the setting also makes the compiler write the error logs).
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+- name: pool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: maxBuildDepth
+  type: number
+  default: 3
+- name: advancedSecurity
+  type: boolean
+  default: false
+
+jobs:
+- job: CodeAnalysis
+  displayName: AL code analysis
+  dependsOn:
+  - Initialization
+  - ${{ each depth in split('1,2,3,4,5,6,7,8,9', ',') }}:
+    - ${{ if le(depth, parameters.maxBuildDepth) }}:
+      - ${{ format('Build{0}', depth) }}
+  condition: and(not(canceled()), eq(dependencies.Initialization.result, 'Succeeded'), eq(dependencies.Initialization.outputs['AlGoAdo.trackALAlerts'], 'True'))
+  pool: ${{ parameters.pool }}
+  steps:
+  - template: /templates/steps/setup.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+      fetchDepth: 1
+
+  - task: DownloadPipelineArtifact@2
+    displayName: Download error logs
+    continueOnError: true
+    inputs:
+      buildType: current
+      itemPattern: '*ErrorLogs-*/**'
+      path: $(ALGO_WORKSPACE)/ErrorLogs
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: ProcessALCodeAnalysisLogs
+      name: ProcessALCodeAnalysisLogs
+      displayName: Process AL code analysis logs
+      shell: ${{ parameters.shell }}
+      condition: succeededOrFailed()
+      inputs:
+        errorLogsFolder: ErrorLogs
+
+  - task: PowerShell@2
+    displayName: Publish code analysis summary
+    condition: succeededOrFailed()
+    inputs:
+      targetType: filePath
+      filePath: $(Pipeline.Workspace)/al-go-ado/src/Publish-AlGoAdoCodeAnalysis.ps1
+      pwsh: ${{ eq(parameters.shell, 'pwsh') }}
+
+  - task: PublishPipelineArtifact@1
+    displayName: Publish SARIF (CodeAnalysisLogs)
+    condition: and(succeededOrFailed(), eq(variables['algoHasSarif'], 'True'))
+    inputs:
+      targetPath: $(Build.ArtifactStagingDirectory)/CodeAnalysisLogs
+      artifact: CodeAnalysisLogs
+
+  - ${{ if parameters.advancedSecurity }}:
+    - task: AdvancedSecurity-Publish@1
+      displayName: Publish to Advanced Security
+      condition: and(succeededOrFailed(), eq(variables['algoHasSarif'], 'True'))
+      inputs:
+        SarifsInputDirectory: $(Build.ArtifactStagingDirectory)/CodeAnalysisLogs

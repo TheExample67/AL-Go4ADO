@@ -1,0 +1,98 @@
+# Deliver job: one job per delivery target determined in the Initialization job (AlGoAdo.deliverMatrix).
+# Equivalent of the Deliver job in AL-Go's CI/CD workflow: NuGet, Storage, AppSource, GitHubPackages and
+# custom targets (.github/DeliverTo<target>.ps1). A target is only used when its <target>Context secret
+# exists (or nuGetFeedUrl is set for NuGet) and the DeliverTo<target> settings (Branches,
+# ContinuousDelivery) allow it.
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+- name: pool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: maxBuildDepth
+  type: number
+  default: 3
+- name: secretNames
+  type: object
+  default: []
+- name: nuGetFeedUrl
+  type: string
+  default: ''
+
+jobs:
+- job: Deliver
+  displayName: Deliver
+  dependsOn:
+  - Initialization
+  - ${{ each depth in split('1,2,3,4,5,6,7,8,9', ',') }}:
+    - ${{ if le(depth, parameters.maxBuildDepth) }}:
+      - ${{ format('Build{0}', depth) }}
+  condition: and(not(canceled()), not(failed()), eq(dependencies.Initialization.result, 'Succeeded'), ne(variables['Build.Reason'], 'PullRequest'), ne(dependencies.Initialization.outputs['AlGoAdo.deliverCount'], '0'))
+  pool: ${{ parameters.pool }}
+  strategy:
+    matrix: $[ dependencies.Initialization.outputs['AlGoAdo.deliverMatrix'] ]
+  variables:
+    projectsJson: $[ dependencies.Initialization.outputs['DetermineProjectsToBuild.ProjectsJson'] ]
+  steps:
+  - template: /templates/steps/setup.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+      fetchDepth: 1
+
+  - task: DownloadPipelineArtifact@2
+    displayName: Download artifacts
+    inputs:
+      buildType: current
+      itemPattern: |
+        *Apps-*/**
+        *Dependencies-*/**
+        *PowerPlatformSolution-*/**
+      path: $(ALGO_WORKSPACE)/.artifacts
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: ReadSettings
+      name: ReadSettings
+      displayName: Read settings
+      shell: ${{ parameters.shell }}
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: ReadSecrets
+      name: ReadSecrets
+      displayName: Read secrets
+      shell: ${{ parameters.shell }}
+      inputs:
+        getSecrets: $(deliveryTarget)Context
+      env:
+        ALGO_NUGET_FEED_URL: ${{ parameters.nuGetFeedUrl }}
+        ${{ each s in parameters.secretNames }}:
+          ${{ format('ALGO_SECRET_{0}', s) }}: $(${{ s }})
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: Deliver
+      name: Deliver
+      displayName: Deliver to $(deliveryTarget)
+      shell: ${{ parameters.shell }}
+      inputs:
+        type: CD
+        projects: $(projectsJson)
+        deliveryTarget: $(deliveryTarget)
+        artifacts: .artifacts
+      env:
+        Secrets: $(ReadSecrets.Secrets)

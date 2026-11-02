@@ -99,6 +99,34 @@ so approvals and checks configured there apply. Whether a run deploys is decided
 Set `"DeployToPROD": { "continuousDeployment": false }` in the AL-Go settings to deploy PROD only through
 `PublishToEnvironment.yml`.
 
+## Delivery
+
+The CI/CD pipeline delivers the build to every target that has a `<target>Context` secret and whose
+`DeliverTo<target>` settings (`Branches` - default `main` only - and `ContinuousDelivery`) allow it:
+NuGet, Storage, AppSource and custom targets (`.github/DeliverTo<target>.ps1`), exactly as in AL-Go.
+
+For an **Azure Artifacts feed** no secret is needed - pass the feed URL and the pipeline's own token is used
+(grant the project's build service *Feed Publisher (Contributor)* on the feed):
+
+```yaml
+    nuGetFeedUrl: https://pkgs.dev.azure.com/<org>/<project>/_packaging/<feed>/nuget/v3/index.json
+```
+
+Continuous delivery creates preview packages in BcContainerHelper's BC NuGet format. Use a feed of its own -
+packages produced by other tooling in a different format should not be mixed into the same feed.
+
+## AL code analysis
+
+Set the AL-Go setting `"trackALAlertsInGitHub": true` (the name is AL-Go's; it also works in Azure DevOps).
+The compiler then writes error logs, and a *Code analysis* job turns them into SARIF and publishes:
+
+- a build summary with the issues per severity, rule, app folder and file,
+- the pipeline artifact `CodeAnalysisLogs` (shown as *Scans* tab with the
+  [SARIF SAST Scans Tab](https://marketplace.visualstudio.com/items?itemName=sariftools.scans) extension),
+- Advanced Security alerts with `advancedSecurity: true` (needs GitHub Advanced Security for Azure DevOps).
+
+Use `codeAnalysisShell: pwsh` on agents with PowerShell 7 - processing thousands of issues is about 5x faster.
+
 ## Releases
 
 A release is a CI/CD run marked with the build tags `AL-Go-Release` / `AL-Go-Release:<tag>` (plus `AL-Go-Prerelease`),
@@ -136,7 +164,8 @@ AL-Go sends telemetry to Microsoft by default (upstream behavior). To disable it
 
 * GitHub-only features: Copilot PR review, GitHub Pages (ALDoc), `Update AL-Go System Files`
   (use the template `ref` instead), GitHub Packages, PR builds from forks.
-* Delivery (`Deliver` to NuGet/Storage/AppSource) and Power Platform build are on the roadmap (see docs/PLAN.md).
+* Power Platform build and ALDoc reference documentation are on the roadmap (see docs/PLAN.md).
+* Delivery as part of *Create release* (non-preview NuGet packages, AppSource submission) is not wired yet.
 * Re-running only failed jobs re-publishes artifacts with existing names and fails; re-run the whole pipeline.
 * Draft releases do not exist in Azure DevOps.
 

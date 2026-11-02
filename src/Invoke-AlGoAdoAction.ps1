@@ -131,6 +131,12 @@ if ($Action -eq 'ReadSecrets' -and -not ($inputs.Keys | Where-Object { $_ -ieq '
         Set-ProcessEnvironmentVariable $_.Name $null
     }
     if ($env:SYSTEM_ACCESSTOKEN) { $secretValues['github_token'] = $env:SYSTEM_ACCESSTOKEN }
+    # Pipeline parameter nuGetFeedUrl: deliver to an Azure Artifacts feed with the pipeline's own token
+    # (the build service needs Feed Publisher (Contributor) on the feed). An explicit NuGetContext secret wins.
+    if ($env:ALGO_NUGET_FEED_URL -and $env:SYSTEM_ACCESSTOKEN -and -not ($secretValues.Keys | Where-Object { $_ -ieq 'NuGetContext' })) {
+        Write-Host "Using NuGetContext for $env:ALGO_NUGET_FEED_URL with System.AccessToken"
+        $secretValues['NuGetContext'] = ConvertTo-Json -InputObject ([ordered]@{ serverUrl = "$env:ALGO_NUGET_FEED_URL"; token = "$env:SYSTEM_ACCESSTOKEN" }) -Compress
+    }
     Write-Host "Secrets available to ReadSecrets: $(@($secretValues.Keys | Where-Object { $_ -ne 'github_token' }) -join ', ')"
     $inputs['gitHubSecrets'] = ConvertTo-Json -InputObject $secretValues -Compress
 }

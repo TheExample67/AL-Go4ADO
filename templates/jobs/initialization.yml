@@ -29,6 +29,15 @@ parameters:
 - name: tagBuild            # tag the run as an AL-Go CI/CD build (used for "last known good build" and latestBuild dependencies)
   type: boolean
   default: false
+- name: deliver             # determine delivery targets (NuGet, Storage, AppSource, custom DeliverTo<target>.ps1)
+  type: boolean
+  default: false
+- name: secretNames         # pipeline variables passed to AL-Go as secrets (delivery target contexts)
+  type: object
+  default: []
+- name: nuGetFeedUrl        # Azure Artifacts feed (NuGet v3 URL) to deliver to with System.AccessToken
+  type: string
+  default: ''
 - name: lfs
   type: boolean
   default: false
@@ -74,7 +83,7 @@ jobs:
       displayName: Read settings
       shell: ${{ parameters.shell }}
       inputs:
-        get: type,powerPlatformSolutionFolder,useGitSubmodules
+        get: type,powerPlatformSolutionFolder,useGitSubmodules,trackALAlertsInGitHub
 
   - template: /templates/steps/action.yml
     parameters:
@@ -95,6 +104,45 @@ jobs:
         inputs:
           getEnvironments: '*'
           type: ${{ parameters.deploymentType }}
+
+  - ${{ if parameters.deliver }}:
+    - template: /templates/steps/action.yml
+      parameters:
+        action: DetermineDeliveryTargets
+        name: DetermineDeliveryTargetSecrets
+        displayName: Determine delivery target secrets
+        shell: ${{ parameters.shell }}
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+        inputs:
+          projectsJson: $(DetermineProjectsToBuild.ProjectsJson)
+          checkContextSecrets: 'false'
+
+    - template: /templates/steps/action.yml
+      parameters:
+        action: ReadSecrets
+        name: ReadSecrets
+        displayName: Read delivery secrets
+        shell: ${{ parameters.shell }}
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+        inputs:
+          getSecrets: $(DetermineDeliveryTargetSecrets.ContextSecrets)
+        env:
+          ALGO_NUGET_FEED_URL: ${{ parameters.nuGetFeedUrl }}
+          ${{ each s in parameters.secretNames }}:
+            ${{ format('ALGO_SECRET_{0}', s) }}: $(${{ s }})
+
+    - template: /templates/steps/action.yml
+      parameters:
+        action: DetermineDeliveryTargets
+        name: DetermineDeliveryTargets
+        displayName: Determine delivery targets
+        shell: ${{ parameters.shell }}
+        condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+        inputs:
+          projectsJson: $(DetermineProjectsToBuild.ProjectsJson)
+          checkContextSecrets: 'true'
+        env:
+          Secrets: $(ReadSecrets.Secrets)
 
   - task: PowerShell@2
     name: AlGoAdo

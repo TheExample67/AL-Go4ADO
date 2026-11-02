@@ -81,6 +81,19 @@ parameters:
 - name: buildTimeoutInMinutes
   type: number
   default: 360
+- name: deliver             # deliver to NuGet / Storage / AppSource / custom targets (needs a <target>Context secret or nuGetFeedUrl)
+  type: boolean
+  default: true
+- name: nuGetFeedUrl        # Azure Artifacts feed to deliver to with System.AccessToken, e.g.
+  type: string              # https://pkgs.dev.azure.com/<org>/<project>/_packaging/<feed>/nuget/v3/index.json
+  default: ''
+- name: codeAnalysisShell   # pwsh processes large error logs ~5x faster than Windows PowerShell (4000 issues: 1.5 vs 8 min)
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: advancedSecurity    # publish AL code analysis alerts to GitHub Advanced Security for Azure DevOps
+  type: boolean
+  default: false
 - name: tagBuild            # mark runs as AL-Go CI/CD builds (last known good build, releases, latestBuild dependencies)
   type: boolean
   default: true
@@ -113,6 +126,9 @@ stages:
       maxBuildDepth: ${{ parameters.maxBuildDepth }}
       environments: ${{ parameters.environments }}
       tagBuild: ${{ parameters.tagBuild }}
+      deliver: ${{ parameters.deliver }}
+      secretNames: ${{ parameters.secretNames }}
+      nuGetFeedUrl: ${{ parameters.nuGetFeedUrl }}
       lfs: ${{ parameters.lfs }}
       submodules: ${{ parameters.submodules }}
 
@@ -133,6 +149,28 @@ stages:
       timeoutInMinutes: ${{ parameters.buildTimeoutInMinutes }}
       lfs: ${{ parameters.lfs }}
       submodules: ${{ parameters.submodules }}
+
+  - template: /templates/jobs/code-analysis.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.codeAnalysisShell }}
+      pool: ${{ parameters.initPool }}
+      maxBuildDepth: ${{ parameters.maxBuildDepth }}
+      advancedSecurity: ${{ parameters.advancedSecurity }}
+
+  - ${{ if parameters.deliver }}:
+    - template: /templates/jobs/deliver.yml
+      parameters:
+        alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+        alGoVersion: ${{ parameters.alGoVersion }}
+        localActionsPath: ${{ parameters.localActionsPath }}
+        shell: ${{ parameters.shell }}
+        pool: ${{ parameters.initPool }}
+        maxBuildDepth: ${{ parameters.maxBuildDepth }}
+        secretNames: ${{ parameters.secretNames }}
+        nuGetFeedUrl: ${{ parameters.nuGetFeedUrl }}
 
 - ${{ if gt(length(parameters.environments), 0) }}:
   - template: /templates/stages/deploy.yml

@@ -7,8 +7,10 @@
     expressions from the AL-Go job state and publishes simple True/False (or JSON matrix) variables.
 
     Modes:
-      Initialization - output variables matrix<N>/count<N> (build matrices per depth) and
-                       deploy_<environment> flags (environments from ALGO_ENVIRONMENTS). Run as step named 'AlGoAdo'.
+      Initialization - output variables matrix<N>/count<N> (build matrices per depth),
+                       deploy_<environment> flags (environments from ALGO_ENVIRONMENTS),
+                       deliverMatrix/deliverCount (delivery targets) and trackALAlerts.
+                       Run as step named 'AlGoAdo'.
       BuildSettings  - job variables algoWorkspaceCompilation, algoCanSign, algoHasBuildInitializeHook, algoHasBuildFinalizeHook.
       BuildOutputs   - job variables algoHas<ArtifactType> telling which build outputs exist for the project.
 #>
@@ -74,6 +76,11 @@ switch ($Mode) {
             $id = $envName -replace '[ .()-]', '_'
             Set-Var -IsOutput "deploy_$id" "$($names -contains $envName)"
         }
+
+        $deliveryMatrix = ConvertTo-AdoDeliveryMatrix -DeliveryTargetsJson (Get-StepOutput 'DetermineDeliveryTargets' 'DeliveryTargetsJson' '[]')
+        Set-Var -IsOutput 'deliverCount' "$($deliveryMatrix.Count)"
+        Set-Var -IsOutput 'deliverMatrix' (ConvertTo-Json -InputObject $deliveryMatrix -Depth 5 -Compress)
+        Set-Var -IsOutput 'trackALAlerts' "$((Get-JobEnv 'trackALAlertsInGitHub' 'False') -eq 'True')"
     }
     'BuildSettings' {
         $settings = (Get-JobEnv 'Settings' '{}') | ConvertFrom-Json

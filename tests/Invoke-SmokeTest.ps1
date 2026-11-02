@@ -31,6 +31,7 @@ $appFolder = Join-Path $workspace 'HelloWorld'
 New-Item $appFolder -ItemType Directory -Force | Out-Null
 @{ id = [guid]::NewGuid().ToString(); name = 'HelloWorld'; publisher = 'Contoso'; version = '1.0.0.0'; application = '26.0.0.0'; platform = '1.0.0.0'; idRanges = @(@{ from = 50100; to = 50149 }); runtime = '15.0' } |
     ConvertTo-Json -Depth 5 | Set-Content (Join-Path $appFolder 'app.json') -Encoding UTF8
+Set-Content -Path (Join-Path $appFolder 'HelloWorld.Codeunit.al') -Encoding UTF8 -Value 'codeunit 50100 "Hello World" { }'
 $ErrorActionPreference = 'Continue'   # git writes progress/warnings to stderr
 & git -C $workspace init --quiet -b main 2>&1 | Out-Null
 & git -C $workspace -c core.autocrlf=false add --all 2>&1 | Out-Null
@@ -110,9 +111,21 @@ try {
     Assert ($env:TYPE -eq 'PTE') 'ReadSettings published the type setting as a job variable'
     Invoke-Action 'DetermineProjectsToBuild' -inputs @{ maxBuildDepth = '3' }
     Assert ($script:outputs['DetermineProjectsToBuild.ProjectsJson'] -like '*"."*') 'DetermineProjectsToBuild found the root project'
+    # Delivery: nuGetFeedUrl makes NuGet a delivery target (NuGetContext from System.AccessToken)
+    $env:ALGO_NUGET_FEED_URL = 'https://pkgs.dev.azure.com/contoso/BC/_packaging/al-go/nuget/v3/index.json'
+    Invoke-Action 'DetermineDeliveryTargets' 'DetermineDeliveryTargetSecrets' @{ projectsJson = $script:outputs['DetermineProjectsToBuild.ProjectsJson']; checkContextSecrets = 'false' }
+    Assert ($script:outputs['DetermineDeliveryTargetSecrets.ContextSecrets'] -like '*NuGetContext*') 'Delivery target secrets include NuGetContext'
+    Invoke-Action 'ReadSecrets' -inputs @{ getSecrets = $script:outputs['DetermineDeliveryTargetSecrets.ContextSecrets'] }
+    $env:Secrets = $script:outputs['ReadSecrets.Secrets']
+    Invoke-Action 'DetermineDeliveryTargets' -inputs @{ projectsJson = $script:outputs['DetermineProjectsToBuild.ProjectsJson']; checkContextSecrets = 'true' }
+    Remove-Item env:Secrets
+    Assert ($script:outputs['DetermineDeliveryTargets.DeliveryTargetsJson'] -eq '["NuGet"]') "Delivery targets: $($script:outputs['DetermineDeliveryTargets.DeliveryTargetsJson'])"
+
     $env:ALGO_ENVIRONMENTS = '[{"name": "QA", "adoEnvironment": "BC-QA"}]'
     Invoke-Step 'AlGoAdo' { & (Join-Path $src 'Set-AlGoAdoJobOutputs.ps1') -Mode Initialization -MaxBuildDepth 3 }
     Assert ($script:outputs['AlGoAdo.deploy_QA'] -eq 'False') 'QA is not deployed (DetermineDeploymentEnvironments did not run)'
+    Assert ($script:outputs['AlGoAdo.deliverCount'] -eq '1' -and $script:outputs['AlGoAdo.deliverMatrix'] -eq '{"NuGet":{"deliveryTarget":"NuGet"}}') "Delivery matrix: $($script:outputs['AlGoAdo.deliverMatrix'])"
+    Assert ($script:outputs['AlGoAdo.trackALAlerts'] -eq 'False') 'Code analysis is off by default'
     Assert ($script:outputs['AlGoAdo.count1'] -eq '1') 'Build matrix depth 1 has one entry'
     Assert ($script:outputs['AlGoAdo.count2'] -eq '0') 'Build matrix depth 2 is empty'
     $matrix = $script:outputs['AlGoAdo.matrix1'] | ConvertFrom-Json
@@ -133,6 +146,26 @@ try {
     Invoke-Action 'CalculateArtifactNames' -inputs @{ project = $env:PROJECT; buildMode = $env:BUILDMODE }
     Assert (-not $script:outputs.ContainsKey('CalculateArtifactNames.BuildMode')) 'Reserved output BuildMode is not set as an Azure DevOps variable'
     Assert ($script:outputs['CalculateArtifactNames.AppsArtifactsName'] -like 'MyApps-main-Apps-*') "Artifact name is $($script:outputs['CalculateArtifactNames.AppsArtifactsName'])"
+
+    # --- Code analysis job: compiler error log -> SARIF (AL-Go) -> summary + artifact folder
+    Reset-Job 'CodeAnalysis'
+    $errorLogs = Join-Path $workspace 'ErrorLogs/MyApps-main-ErrorLogs-1.0.7.0'
+    New-Item $errorLogs -ItemType Directory -Force | Out-Null
+    $alFile = 'C:\agent\_work\9\self\HelloWorld\HelloWorld.Codeunit.al'   # path from another agent, mapped by file name
+    $issue = { param($rule, $severity, $line) [ordered]@{ ruleId = $rule; shortMessage = "$rule message"; fullMessage = "$rule description"
+            locations = @(@{ analysisTarget = @(@{ uri = $alFile; region = @{ startLine = $line; startColumn = 1; endLine = $line; endColumn = 5 } }) })
+            properties = @{ severity = $severity; category = 'Compiler'; helpLink = "https://learn.microsoft.com/$rule" } } }
+    @{ version = '1.0.0'; issues = @((& $issue 'AL0432' 'Warning' 1), (& $issue 'AL0432' 'Warning' 2), (& $issue 'AL0603' 'Warning' 3)) } |
+        ConvertTo-Json -Depth 10 | Set-Content (Join-Path $errorLogs 'HelloWorld.errorLog.json') -Encoding UTF8
+    Invoke-Action 'ProcessALCodeAnalysisLogs' -inputs @{ errorLogsFolder = 'ErrorLogs' }
+    $sarif = Get-Content (Join-Path $workspace 'ErrorLogs/output.sarif.json') -Raw | ConvertFrom-Json
+    Assert (@($sarif.runs[0].results).Count -eq 3) "SARIF has 3 results"
+    Assert ($sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri -eq 'HelloWorld/HelloWorld.Codeunit.al') 'SARIF paths are relative to the repository'
+    $env:BUILD_ARTIFACTSTAGINGDIRECTORY = Join-Path $root 'staging'
+    Invoke-Step 'PublishCodeAnalysis' { & (Join-Path $src 'Publish-AlGoAdoCodeAnalysis.ps1') }
+    Assert ($env:ALGOHASSARIF -eq 'True' -and (Test-Path (Join-Path $root 'staging/CodeAnalysisLogs/ALCodeAnalysis.sarif'))) 'SARIF copied for the CodeAnalysisLogs artifact'
+    $summary = Get-Content (Join-Path $env:AGENT_TEMPDIRECTORY 'al-code-analysis.md') -Raw
+    Assert ($summary -match '\*\*3\*\* issue' -and $summary -match '\| AL0432 \| 2 \|' -and $summary -match '\| HelloWorld \| 3 \|') 'Code analysis summary lists issues per rule and app folder'
 
     Write-Host "Smoke test succeeded" -ForegroundColor Green
 }

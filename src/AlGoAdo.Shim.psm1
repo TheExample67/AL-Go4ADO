@@ -377,6 +377,29 @@ function ConvertTo-AdoBuildMatrix {
 
 <#
     .SYNOPSIS
+    Converts AL-Go's DeliveryTargetsJson (e.g. ["NuGet","Storage"]) to an Azure DevOps matrix with a
+    deliveryTarget variable per job.
+#>
+function ConvertTo-AdoDeliveryMatrix {
+    Param(
+        [AllowEmptyString()]
+        [string] $DeliveryTargetsJson
+    )
+    $matrix = [ordered]@{}
+    if (-not $DeliveryTargetsJson) { return $matrix }
+    # Windows PowerShell 5.1 returns a JSON array as one pipeline object - assign first, then wrap
+    $parsed = ConvertFrom-Json -InputObject $DeliveryTargetsJson
+    foreach ($target in @($parsed)) {
+        if (-not $target) { continue }
+        $key = ("$target" -replace '[^A-Za-z0-9_]', '_')
+        if ($key -match '^[0-9]') { $key = "t_$key" }
+        $matrix[$key] = [ordered]@{ deliveryTarget = "$target" }
+    }
+    return $matrix
+}
+
+<#
+    .SYNOPSIS
     Reads the literal default values of the inputs declared in an action's action.yaml.
     Defaults that are GitHub expressions (${{ ... }}) are ignored.
 #>
@@ -426,4 +449,4 @@ function Get-AlGoAdoEnvironmentName([string] $Value = $env:ALGO_ENVIRONMENTS) {
 }
 
 Export-ModuleMember -Function Get-AlGoGitHubEnvironment, New-AlGoEventPayload, ConvertTo-AdoLogLine, Read-GitHubFileCommand, `
-    Format-AdoSetVariable, Test-SecretVariableName, ConvertTo-AdoBuildMatrix, ConvertTo-GitHubEventName, Get-EnvValue, Get-ActionInputDefault, Get-AlGoAdoEnvironmentName, Set-ProcessEnvironmentVariable, ConvertTo-NormalizedPath, Test-AdoReservedVariableName
+    Format-AdoSetVariable, Test-SecretVariableName, ConvertTo-AdoBuildMatrix, ConvertTo-GitHubEventName, Get-EnvValue, Get-ActionInputDefault, Get-AlGoAdoEnvironmentName, Set-ProcessEnvironmentVariable, ConvertTo-NormalizedPath, Test-AdoReservedVariableName, ConvertTo-AdoDeliveryMatrix

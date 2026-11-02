@@ -109,8 +109,13 @@ the override + REST modules next to it.
 10. `pipelines/increment-version-number.yml`, `pipelines/create-app.yml` (app/test app/performance test app) using the git/PR overrides.
 11. `pipelines/publish-to-environment.yml` — manual deploy of `current`/`latest`/`<version>` artifacts.
 
-### Phase 3 — Backlog
-12. Delivery targets (`Deliver`): Azure Artifacts NuGet feed, storage, AppSource.
+### Phase 3 — Delivery and code analysis (implemented)
+12. `jobs/deliver.yml`: AL-Go's two-pass delivery target detection in Initialization, one Deliver job per target
+    (NuGet, Storage, AppSource, custom). `nuGetFeedUrl` delivers to Azure Artifacts with `System.AccessToken`.
+    `jobs/code-analysis.yml`: error logs → SARIF (ProcessALCodeAnalysisLogs) → build summary,
+    `CodeAnalysisLogs` artifact, optional Advanced Security.
+
+### Phase 4 — Backlog
 13. Incremental builds end-to-end validation (overrides exist; needs real-world testing).
 14. Power Platform solutions, ALDoc reference documentation (Azure Static Web Apps instead of GitHub Pages).
 15. Pipeline that checks for a newer AL-Go4ADO / AL-Go version and opens a PR bumping `ref`/`alGoVersion`.
