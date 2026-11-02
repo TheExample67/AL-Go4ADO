@@ -202,3 +202,26 @@ runs:
         $defaults.ContainsKey('token') | Should -BeFalse
     }
 }
+
+Describe 'ConvertTo-NormalizedPath' {
+    It 'normalizes mixed separators and trailing separators' -Skip:([System.IO.Path]::DirectorySeparatorChar -ne '\') {
+        ConvertTo-NormalizedPath 'C:\agent\_work\16/self' | Should -BeExactly 'C:\agent\_work\16\self'
+        ConvertTo-NormalizedPath 'C:\agent\_work\16/self/' | Should -BeExactly 'C:\agent\_work\16\self'
+        ConvertTo-NormalizedPath 'C:\' | Should -BeExactly 'C:\'
+    }
+}
+
+Describe 'Test-AdoReservedVariableName' {
+    AfterEach { $env:ALGO_RESERVED_VARIABLES = $null }
+
+    It 'reserves the build matrix variables case-insensitively' {
+        Test-AdoReservedVariableName 'BuildMode' | Should -BeTrue
+        Test-AdoReservedVariableName 'project' | Should -BeTrue
+        Test-AdoReservedVariableName 'AppsArtifactsName' | Should -BeFalse
+    }
+
+    It 'honors ALGO_RESERVED_VARIABLES' {
+        $env:ALGO_RESERVED_VARIABLES = 'artifact, country'
+        Test-AdoReservedVariableName 'Country' | Should -BeTrue
+    }
+}

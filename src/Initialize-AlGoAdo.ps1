@@ -112,6 +112,8 @@ else {
 }
 
 if (-not $Workspace) { $Workspace = (Get-Location).Path }
+Import-Module (Join-Path $PSScriptRoot 'AlGoAdo.Shim.psm1') -Force -DisableNameChecking
+$Workspace = ConvertTo-NormalizedPath $Workspace
 Write-Host "AL-Go actions : $actionsPath"
 Write-Host "AL-Go4ADO src : $PSScriptRoot"
 Write-Host "Workspace     : $Workspace"

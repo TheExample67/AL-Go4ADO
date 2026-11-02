@@ -99,7 +99,9 @@ try {
 
     # --- Initialization job
     Reset-Job 'Initialization'
-    Invoke-Step 'Setup' { & (Join-Path $src 'Initialize-AlGoAdo.ps1') -AlGoVersion $AlGoVersion -LocalActionsPath $LocalActionsPath -Workspace $workspace }
+    # The agent passes '$(Pipeline.Workspace)/self' - a path with mixed separators on Windows
+    Invoke-Step 'Setup' { & (Join-Path $src 'Initialize-AlGoAdo.ps1') -AlGoVersion $AlGoVersion -LocalActionsPath $LocalActionsPath -Workspace "$root/self" }
+    Assert ($env:ALGO_WORKSPACE -eq [System.IO.Path]::GetFullPath($workspace)) "Workspace is normalized ($env:ALGO_WORKSPACE)"
     Assert (Test-Path (Join-Path $env:ALGO_ACTIONS_PATH 'AL-Go-Helper.ps1')) 'AL-Go actions are available'
     Assert ((Get-Content (Join-Path $env:ALGO_ACTIONS_PATH 'AL-Go-Helper.ps1') -Raw).Contains('AL-Go4ADO hook')) 'Override hook is installed'
 
@@ -129,6 +131,7 @@ try {
     Invoke-Action 'ReadSecrets' -inputs @{ getSecrets = 'licenseFileUrl,appDependencySecrets,AZURE_CREDENTIALS' }
     Assert ($null -ne $script:outputs['ReadSecrets.Secrets']) 'ReadSecrets produced a Secrets output'
     Invoke-Action 'CalculateArtifactNames' -inputs @{ project = $env:PROJECT; buildMode = $env:BUILDMODE }
+    Assert (-not $script:outputs.ContainsKey('CalculateArtifactNames.BuildMode')) 'Reserved output BuildMode is not set as an Azure DevOps variable'
     Assert ($script:outputs['CalculateArtifactNames.AppsArtifactsName'] -like 'MyApps-main-Apps-*') "Artifact name is $($script:outputs['CalculateArtifactNames.AppsArtifactsName'])"
 
     Write-Host "Smoke test succeeded" -ForegroundColor Green

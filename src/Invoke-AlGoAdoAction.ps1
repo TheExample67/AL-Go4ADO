@@ -36,6 +36,7 @@ Import-Module (Join-Path $PSScriptRoot 'AlGoAdo.Shim.psm1') -Force -DisableNameC
 
 if (-not $StepName) { $StepName = $Action }
 if (-not $Workspace) { $Workspace = $env:BUILD_SOURCESDIRECTORY }
+$Workspace = ConvertTo-NormalizedPath $Workspace
 if (-not $ActionsPath -or -not (Test-Path $ActionsPath)) {
     throw "AL-Go actions not found ('$ActionsPath'). Make sure the setup step (templates/steps/setup.yml) ran in this job."
 }
@@ -175,6 +176,10 @@ $ErrorActionPreference = 'Stop'
 $newEnv = Read-GitHubFileCommand -Path $envFile
 foreach ($key in $newEnv.Keys) {
     $state.env[$key] = $newEnv[$key]
+    if (Test-AdoReservedVariableName $key) {
+        Write-Host "##[debug]$key is only kept in the AL-Go job state (reserved pipeline variable)"
+        continue
+    }
     if ("$($newEnv[$key])".Length -gt 16000) {
         # Large values (e.g. the full Settings JSON) stay in the job state only - they are not needed in conditions
         Write-Host "##[debug]$key is only kept in the AL-Go job state ($("$($newEnv[$key])".Length) characters)"
@@ -189,6 +194,11 @@ $stepOutputs = [ordered]@{}
 foreach ($key in $newOutputs.Keys) {
     $isSecret = Test-SecretVariableName $key
     if (-not $isSecret) { $stepOutputs[$key] = $newOutputs[$key] }
+    if (Test-AdoReservedVariableName $key) {
+        # Setting an output variable also sets the plain name, which the agent refuses for read-only (matrix) variables
+        Write-Host "##[debug]Output $key is only kept in the AL-Go job state (reserved pipeline variable)"
+        continue
+    }
     Write-Host (Format-AdoSetVariable -Name $key -Value $newOutputs[$key] -IsOutput -IsSecret:$isSecret)
 }
 $state.outputs[$StepName] = $stepOutputs

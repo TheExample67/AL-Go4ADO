@@ -37,6 +37,31 @@ function Set-ProcessEnvironmentVariable([string] $Name, [AllowEmptyString()][All
     }
 }
 
+<#
+    .SYNOPSIS
+    Returns a full path with the platform's directory separator and without a trailing separator.
+    Azure DevOps paths like '$(Pipeline.Workspace)/self' mix '\' and '/' on Windows, which breaks
+    tools that compare paths as strings (BcContainerHelper's Run-AlPipeline).
+#>
+function ConvertTo-NormalizedPath([string] $Path) {
+    if (-not $Path) { return $Path }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($full)
+    if ($full.Length -gt $root.Length) { $full = $full.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) }
+    return $full
+}
+
+<#
+    .SYNOPSIS
+    Returns true for variable names that must not be set as Azure DevOps variables because the
+    pipeline already defines them read-only (the build matrix variables), plus ALGO_RESERVED_VARIABLES.
+    Such values stay in the AL-Go job state, so later AL-Go steps still get them.
+#>
+function Test-AdoReservedVariableName([string] $Name) {
+    $reserved = @('project', 'projectName', 'buildMode') + @("$env:ALGO_RESERVED_VARIABLES".Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    return [bool]($reserved | Where-Object { $_ -ieq $Name })
+}
+
 function Remove-RefPrefix([string] $ref) {
     if ($ref -like 'refs/heads/*') { return $ref.Substring(11) }
     if ($ref -like 'refs/tags/*') { return $ref.Substring(10) }
@@ -401,4 +426,4 @@ function Get-AlGoAdoEnvironmentName([string] $Value = $env:ALGO_ENVIRONMENTS) {
 }
 
 Export-ModuleMember -Function Get-AlGoGitHubEnvironment, New-AlGoEventPayload, ConvertTo-AdoLogLine, Read-GitHubFileCommand, `
-    Format-AdoSetVariable, Test-SecretVariableName, ConvertTo-AdoBuildMatrix, ConvertTo-GitHubEventName, Get-EnvValue, Get-ActionInputDefault, Get-AlGoAdoEnvironmentName, Set-ProcessEnvironmentVariable
+    Format-AdoSetVariable, Test-SecretVariableName, ConvertTo-AdoBuildMatrix, ConvertTo-GitHubEventName, Get-EnvValue, Get-ActionInputDefault, Get-AlGoAdoEnvironmentName, Set-ProcessEnvironmentVariable, ConvertTo-NormalizedPath, Test-AdoReservedVariableName
