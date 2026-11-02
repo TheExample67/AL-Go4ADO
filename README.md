@@ -1,5 +1,7 @@
 # AL-Go for Azure DevOps (AL-Go4ADO)
 
+[![AL-Go compatibility](https://github.com/TheExample67/AL-Go4ADO/actions/workflows/al-go-compatibility.yml/badge.svg)](https://github.com/TheExample67/AL-Go4ADO/actions/workflows/al-go-compatibility.yml)
+
 Run [AL-Go for GitHub](https://github.com/microsoft/AL-Go) — Microsoft's build system for Business Central AL
 apps — in **Azure DevOps Pipelines**, on **Microsoft-hosted** or **self-hosted** agents.
 
@@ -9,6 +11,29 @@ Your repositories keep the standard AL-Go layout and settings (`.github/AL-Go-Se
 `.AL-Go/settings.json`, …), so the same settings documentation applies: <https://aka.ms/algosettings>.
 
 See [docs/PLAN.md](docs/PLAN.md) for the architecture, the GitHub → Azure DevOps mapping and the roadmap.
+
+## Who is this for?
+
+AL-Go4ADO is meant as a **stepping stone to GitHub**. It is for Business Central teams whose code and pipelines
+live in Azure DevOps today and who see their future on GitHub with AL-Go — but can't move everything at once.
+
+Moving a team's whole development process is a big step. AL-Go4ADO lets you take the largest part of it
+first, inside the environment you already know:
+
+- **Adopt AL-Go now.** Restructure your repositories into AL-Go projects, move your build configuration into
+  AL-Go settings, use AL-Go's versioning, test runs, code analysis and release model — with your existing
+  Azure DevOps repositories, agents, feeds and approvals.
+- **Learn it with your real code.** Your team gets used to AL-Go's conventions and settings while delivery
+  continues as usual, instead of learning a new platform and a new build system on the same day.
+- **Move when you are ready.** Everything that describes *how* your apps are built — repository layout,
+  `.AL-Go/settings.json`, `.github/AL-Go-Settings.json`, override scripts such as `NewBcContainer.ps1` —
+  works unchanged in AL-Go for GitHub. The move itself is mostly about the platform: add the AL-Go workflows,
+  move secrets and environments to GitHub, and retire the Azure DevOps pipeline files.
+
+AL-Go4ADO runs the original AL-Go code and follows its releases (tested weekly against every AL-Go release),
+so what you learn and configure here carries over. It also works as a long-term setup, but some AL-Go
+features exist only on GitHub (see [Limitations](#limitations--not-yet-supported)) - if you plan to stay on
+Azure DevOps for good, check that list first.
 
 ## What you get
 
@@ -145,14 +170,27 @@ selected in the *Resources* picker. Releases are used by `DownloadPreviousReleas
 4. lets `src/AlGoAdo.Overrides.ps1` (hooked into `AL-Go-Helper.ps1`) replace the GitHub API calls
    (releases, artifacts, last known good build, environments, git push / pull requests) with Azure DevOps REST.
 
-## Upgrading AL-Go
+## Supported AL-Go versions
 
-`alGoVersion` selects the `microsoft/AL-Go-Actions` ref (default `v10.0`; pin a commit SHA for fully
-reproducible builds). Before raising the default, run the tests against the new version:
+AL-Go4ADO supports **AL-Go v9.1 and later**. `alGoVersion` selects the `microsoft/AL-Go-Actions` ref
+(default `v10.0`; pin a commit SHA for fully reproducible builds).
+
+The [AL-Go compatibility](.github/workflows/al-go-compatibility.yml) workflow tests every AL-Go release from
+v9.1 and AL-Go's `main` branch (preview, informational) on every change and weekly, so new AL-Go releases are
+checked automatically:
+
+- unit tests on Windows PowerShell 5.1 and PowerShell 7,
+- a static check that the actions and inputs the templates use exist and that AL-Go's calls to the functions
+  AL-Go4ADO replaces still match (`tests/Test-AlGoCompatibility.ps1`),
+- a smoke test running real AL-Go actions through the wrapper in a simulated agent (`tests/Invoke-SmokeTest.ps1`).
+
+Locally:
 
 ```powershell
 Invoke-Pester ./tests
-./tests/Invoke-SmokeTest.ps1 -AlGoVersion v10.1     # runs real AL-Go actions in a simulated agent
+./tests/Invoke-SmokeTest.ps1 -AlGoVersion v10.0
+git clone --depth 1 --branch v10.0 https://github.com/microsoft/AL-Go-Actions.git $env:TEMPlgo
+./tests/Test-AlGoCompatibility.ps1 -ActionsPath $env:TEMPlgo
 ```
 
 ## Telemetry

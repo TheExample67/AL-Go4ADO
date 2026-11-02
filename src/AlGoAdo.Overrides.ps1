@@ -168,7 +168,8 @@ function GetArtifactsFromWorkflowRun {
         [string] $api_url,
         [string] $repository,
         [string] $mask,
-        [string] $projects
+        [string] $projects,
+        [ref] $expiredArtifacts   # GitHub expires artifacts separately; in Azure DevOps they live as long as the run
     )
     $target = Get-AlGoAdoRepoTarget $repository
     $artifacts = @(Get-AdoBuildArtifacts -BuildId $workflowRun -Project $target.Project)
@@ -250,6 +251,7 @@ function DownloadArtifact {
 function GetDependencies {
     Param(
         $probingPathsJson,
+        [string] $api_url = $ENV:GITHUB_API_URL,   # AL-Go <= v10 passes it; not used in Azure DevOps
         [string] $saveToPath = (Join-Path $ENV:GITHUB_WORKSPACE ".dependencies"),
         [string[]] $masks = @('Apps', 'Dependencies', 'TestApps')
     )

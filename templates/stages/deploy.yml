@@ -123,17 +123,3 @@ stages:
                   deploymentEnvironmentsJson: $(deploymentEnvironmentsJson)
                 env:
                   Secrets: $(ReadSecrets.Secrets)
-
-            - template: /templates/steps/action.yml
-              parameters:
-                action: DeployPowerPlatform
-                name: DeployPowerPlatform
-                displayName: Deploy to Power Platform
-                shell: powershell
-                condition: and(succeeded(), eq(variables['type'], 'PTE'), ne(variables['powerPlatformSolutionFolder'], ''))
-                inputs:
-                  environmentName: ${{ environment.name }}
-                  artifactsFolder: .artifacts
-                  deploymentEnvironmentsJson: $(deploymentEnvironmentsJson)
-                env:
-                  Secrets: $(ReadSecrets.Secrets)

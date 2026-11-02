@@ -1,0 +1,146 @@
+name: AL-Go compatibility
+
+# Tests AL-Go4ADO against every released AL-Go version (microsoft/AL-Go-Actions v9.1 and later) and AL-Go's
+# main branch: unit tests, a static compatibility check (tests/Test-AlGoCompatibility.ps1) and a smoke test that
+# runs real AL-Go actions through the wrapper in a simulated Azure DevOps agent (tests/Invoke-SmokeTest.ps1).
+# The weekly schedule picks up new AL-Go releases automatically.
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'src/**', 'templates/**', 'tests/**', 'samples/**', '.github/workflows/al-go-compatibility.yml' ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 5 * * 1'   # Mondays 05:00 UTC
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'AL-Go versions to test, comma separated (empty = all releases from v9.1 and main)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MINIMUM_VERSION: '9.1'
+
+jobs:
+  versions:
+    name: Determine AL-Go versions
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.versions.outputs.matrix }}
+    steps:
+      - name: List AL-Go-Actions releases
+        id: versions
+        shell: pwsh
+        env:
+          REQUESTED: ${{ github.event.inputs.versions }}
+        run: |
+          if ($env:REQUESTED) {
+            $versions = @($env:REQUESTED.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          }
+          else {
+            $minimum = [version]$env:MINIMUM_VERSION
+            $versions = @(git ls-remote --heads https://github.com/microsoft/AL-Go-Actions.git |
+              ForEach-Object { ($_ -split 'refs/heads/')[1] } |
+              Where-Object { $_ -match '^v(\d+)\.(\d+)$' -and [version]"$($Matches[1]).$($Matches[2])" -ge $minimum } |
+              Sort-Object { [version]$_.Substring(1) })
+            $versions += 'main'
+          }
+          Write-Host "Versions: $($versions -join ', ')"
+          "matrix=$(ConvertTo-Json -InputObject @($versions) -Compress)" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
+
+  unit-tests:
+    name: Unit tests (${{ matrix.shell }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [ powershell, pwsh ]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester
+        run: Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run unit tests
+        run: |
+          Import-Module Pester -MinimumVersion 5.5
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests'
+          $config.Run.PassThru = $true
+          $config.Output.Verbosity = 'Detailed'
+          $result = Invoke-Pester -Configuration $config
+          "### Unit tests ($env:SHELLNAME): $($result.PassedCount) passed, $($result.FailedCount) failed" | Add-Content $env:GITHUB_STEP_SUMMARY
+          $result.Failed | ForEach-Object { "- :x: $($_.ExpandedPath)" } | Add-Content $env:GITHUB_STEP_SUMMARY
+          if ($result.FailedCount -gt 0 -or $result.Result -ne 'Passed') { exit 1 }
+          exit 0
+        env:
+          SHELLNAME: ${{ matrix.shell }}
+
+  compatibility:
+    name: AL-Go ${{ matrix.version }} (${{ matrix.shell }})
+    needs: versions
+    runs-on: windows-latest
+    # AL-Go main is a preview - report, don't fail the run
+    continue-on-error: ${{ matrix.version == 'main' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.versions.outputs.matrix) }}
+        shell: [ powershell, pwsh ]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get AL-Go-Actions ${{ matrix.version }}
+        run: git -c core.longpaths=true clone --quiet --depth 1 --branch "${{ matrix.version }}" https://github.com/microsoft/AL-Go-Actions.git "$env:RUNNER_TEMP/al-go-actions"
+
+      - name: Static compatibility check
+        if: matrix.shell == 'pwsh'
+        run: |
+          $findings = @(./tests/Test-AlGoCompatibility.ps1 -ActionsPath "$env:RUNNER_TEMP/al-go-actions")
+          $errors = @($findings | Where-Object Severity -eq 'Error')
+          $summary = @("### Static compatibility check - AL-Go ${{ matrix.version }}", '')
+          if ($findings) {
+            $summary += '| Severity | Check | Finding |', '|---|---|---|'
+            $summary += $findings | ForEach-Object { "| $($_.Severity) | $($_.Check) | $($_.Message.Replace('|', '\|')) |" }
+          }
+          else { $summary += 'No findings.' }
+          $summary | Add-Content $env:GITHUB_STEP_SUMMARY
+          $findings | Format-Table -AutoSize -Wrap | Out-String -Width 300 | Write-Host
+          $findings | Where-Object Severity -eq 'Error' | ForEach-Object { Write-Host "::error title=AL-Go ${{ matrix.version }}::$($_.Message)" }
+          $findings | Where-Object Severity -eq 'Warning' | ForEach-Object { Write-Host "::warning title=AL-Go ${{ matrix.version }}::$($_.Message)" }
+          if ($errors) { exit 1 }
+          exit 0
+
+      - name: Smoke test
+        run: |
+          $output = [System.Collections.Generic.List[string]]::new()
+          try {
+            ./tests/Invoke-SmokeTest.ps1 -AlGoVersion "${{ matrix.version }}" *>&1 | ForEach-Object { $output.Add("$_"); Write-Host "$_" }
+          }
+          catch {
+            $output.Add("Exception: $($_.Exception.Message)"); Write-Host "::error::$($_.Exception.Message)"
+          }
+          $ok = @($output | Where-Object { "$_" -like 'OK:*' })
+          $passed = [bool]($output | Where-Object { "$_" -eq 'Smoke test succeeded' })
+          $icon = $(if ($passed) { ':white_check_mark:' } else { ':x:' })
+          "### $icon Smoke test - AL-Go ${{ matrix.version }} (${{ matrix.shell }}): $($ok.Count) checks passed" | Add-Content $env:GITHUB_STEP_SUMMARY
+          if (-not $passed) {
+            $output | Where-Object { "$_" -match 'ASSERTION|##\[error\]|logissue type=error|Exception' } | Select-Object -First 5 | ForEach-Object { "    $_" } | Add-Content $env:GITHUB_STEP_SUMMARY
+            exit 1
+          }
+          exit 0
