@@ -11,7 +11,7 @@ resources:
   - repository: AlGoAdo
     type: git                       # Azure Repos repository containing AL-Go4ADO (or type: github + endpoint)
     name: Shared/AL-Go4ADO          # <project>/<repository>
-    ref: refs/tags/v1.0.0           # pin a version of AL-Go4ADO
+    ref: refs/tags/v0.1              # release line v0.1.x (or refs/tags/v0.1.0 for a fixed version)
 
 extends:
   template: templates/pipelines/cicd.yml@AlGoAdo

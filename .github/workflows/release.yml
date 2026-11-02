@@ -1,0 +1,99 @@
+name: Release
+
+# Creates an AL-Go4ADO release from main after the full AL-Go compatibility tests passed:
+#   - annotated tag v<version> on the tested commit
+#   - GitHub release with notes generated from the changes since the previous release
+#     (0.x versions are marked as pre-release)
+#   - moving tag for the release line: v0.<minor> for 0.x versions, v<major> from 1.0.0 on
+# Pipelines pin the moving tag (automatic fixes) or the exact tag (fully reproducible):
+#   ref: refs/tags/v0.1    or    ref: refs/tags/v0.1.0
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (major.minor.patch, e.g. 0.1.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      lineTag: ${{ steps.version.outputs.lineTag }}
+      previousTag: ${{ steps.version.outputs.previousTag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version
+        id: version
+        shell: pwsh
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw "Releases are created from main (this run: $env:GITHUB_REF)" }
+          $version = $env:VERSION.Trim().TrimStart('v')
+          if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)$') { throw "'$env:VERSION' is not a version of the form major.minor.patch" }
+          $major = [int]$Matches[1]; $minor = [int]$Matches[2]
+          $tag = "v$version"
+          $existing = @(git tag --list 'v*' | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Substring(1) })
+          if ($existing -contains $tag) { throw "Tag $tag already exists" }
+          $previous = $existing | Select-Object -Last 1
+          if ($previous -and [version]$version -le [version]$previous.Substring(1)) { throw "$tag must be higher than the latest release $previous" }
+          $lineTag = $(if ($major -eq 0) { "v0.$minor" } else { "v$major" })
+          Write-Host "Releasing $tag (line $lineTag, previous release: $(if ($previous) { $previous } else { 'none' }))"
+          "tag=$tag", "lineTag=$lineTag", "previousTag=$previous", "prerelease=$($major -eq 0)".ToLowerInvariant() | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
+
+  test:
+    name: Compatibility tests
+    needs: validate
+    uses: ./.github/workflows/al-go-compatibility.yml
+
+  release:
+    name: Create release ${{ needs.validate.outputs.tag }}
+    needs: [ validate, test ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          LINE_TAG: ${{ needs.validate.outputs.lineTag }}
+          PREVIOUS_TAG: ${{ needs.validate.outputs.previousTag }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "AL-Go4ADO $TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+          # Moving tag for the release line (v0.<minor> / v<major>) - lightweight, force-updated
+          git tag -f "$LINE_TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$LINE_TAG"
+
+          args=( "$TAG" --title "AL-Go4ADO $TAG" --generate-notes --verify-tag )
+          if [ -n "$PREVIOUS_TAG" ]; then args+=( --notes-start-tag "$PREVIOUS_TAG" ); fi
+          if [ "$PRERELEASE" = "true" ]; then args+=( --prerelease ); else args+=( --latest ); fi
+          gh release create "${args[@]}"
+
+          {
+            echo "### Released $TAG"
+            echo ""
+            echo "Use it in Azure DevOps pipelines with \`ref: refs/tags/$LINE_TAG\` (automatic fixes) or \`ref: refs/tags/$TAG\` (fixed)."
+            echo ""
+            echo "If your pipelines use an Azure DevOps copy of this repository, push the tags there as well:"
+            echo "\`git fetch --tags origin && git push <azure-devops-remote> $TAG && git push -f <azure-devops-remote> refs/tags/$LINE_TAG\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -19,13 +19,15 @@ on:
         description: 'AL-Go versions to test, comma separated (empty = all releases from v9.1 and main)'
         required: false
         default: ''
+  workflow_call:   # used by the Release workflow
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # when called by the Release workflow, github.workflow is the caller's name - keep the groups apart
+  group: al-go-compatibility-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.event_name != 'workflow_call' }}
 
 env:
   MINIMUM_VERSION: '9.1'

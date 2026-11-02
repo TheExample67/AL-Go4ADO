@@ -32,7 +32,7 @@ resources:
   - repository: AlGoAdo
     type: git
     name: Shared/AL-Go4ADO
-    ref: refs/tags/v1.0.0
+    ref: refs/tags/v0.1
   pipelines:
   - pipeline: cicd                  # alias used by the template
     source: CICD                    # name of the CI/CD pipeline in Azure DevOps

@@ -53,8 +53,9 @@ Central environments with Azure DevOps approvals, releases, and pull requests cr
 
 ## Quick start
 
-1. **Import this repository** into your Azure DevOps organization (e.g. project `Shared`, repository `AL-Go4ADO`)
-   and tag a version (`git tag v1.0.0`).
+1. **Get AL-Go4ADO into Azure DevOps**: import this repository into your organization (e.g. project `Shared`,
+   repository `AL-Go4ADO`, including tags), or reference it on GitHub directly (`type: github` with a GitHub
+   service connection). Pin a release, see [Versions](#versions).
 2. **Create an AL-Go repository** — start from [`samples/per-tenant-extension`](samples/per-tenant-extension)
    (or keep an existing AL-Go for GitHub repository; only the pipeline files are new).
    Update `resources.repositories` in the pipeline files to point to your copy of AL-Go4ADO.
@@ -169,6 +170,24 @@ selected in the *Resources* picker. Releases are used by `DownloadPreviousReleas
 3. publishes `GITHUB_OUTPUT` as output variables (`$(<step>.<Output>)`) and `GITHUB_ENV` as job variables,
 4. lets `src/AlGoAdo.Overrides.ps1` (hooked into `AL-Go-Helper.ps1`) replace the GitHub API calls
    (releases, artifacts, last known good build, environments, git push / pull requests) with Azure DevOps REST.
+
+## Versions
+
+AL-Go4ADO is released from GitHub with the [Release](.github/workflows/release.yml) workflow, which first runs the
+full AL-Go compatibility tests. Each release gets a tag and release notes
+([releases](https://github.com/TheExample67/AL-Go4ADO/releases)):
+
+| `ref` in your pipeline | Gets |
+|---|---|
+| `refs/tags/v0.1` | the newest `0.1.x` release - fixes arrive automatically |
+| `refs/tags/v0.1.0` | exactly that release - fully reproducible |
+| `refs/heads/main` | every change as soon as it is merged - for trying things out only |
+
+Before 1.0, a new minor version (0.2) may contain breaking changes, so the moving tag follows the minor line;
+from 1.0 on it follows the major version (`v1`). 0.x releases are marked as pre-release.
+
+If your pipelines use an imported Azure DevOps copy, bring new tags over with
+`git fetch --tags <github> && git push --tags <azure-devops>` (the moving tag needs `--force`).
 
 ## Supported AL-Go versions
 
