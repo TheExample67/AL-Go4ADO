@@ -1,0 +1,57 @@
+# Runs one AL-Go action (folder name in microsoft/AL-Go-Actions) through the AL-Go4ADO shim.
+#
+# Outputs of the action are available as $(<name>.<Output>) in the same job and as
+# dependencies.<job>.outputs['<name>.<Output>'] in other jobs.
+# Inputs are matched (case-insensitively) to the parameters of the action script.
+# An input value 'fromSecrets:<secret>' is resolved from the Secrets output of ReadSecrets.
+parameters:
+- name: action
+  type: string
+- name: name                # step name - required when outputs are used
+  type: string
+  default: ''
+- name: displayName
+  type: string
+  default: ''
+- name: script              # optional script inside the action folder (default <action>.Action.ps1 or <action>.ps1)
+  type: string
+  default: ''
+- name: condition
+  type: string
+  default: succeeded()
+- name: inputs
+  type: object
+  default: {}
+- name: env
+  type: object
+  default: {}
+- name: shell
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: continueOnError
+  type: boolean
+  default: false
+
+steps:
+- task: PowerShell@2
+  ${{ if ne(parameters.name, '') }}:
+    name: ${{ parameters.name }}
+  displayName: ${{ coalesce(parameters.displayName, parameters.action) }}
+  condition: ${{ parameters.condition }}
+  continueOnError: ${{ parameters.continueOnError }}
+  inputs:
+    targetType: filePath
+    filePath: $(Pipeline.Workspace)/al-go-ado/src/Invoke-AlGoAdoAction.ps1
+    arguments: >-
+      -Action '${{ parameters.action }}'
+      -StepName '${{ coalesce(parameters.name, parameters.action) }}'
+      -Script '${{ parameters.script }}'
+    workingDirectory: $(ALGO_WORKSPACE)
+    pwsh: ${{ eq(parameters.shell, 'pwsh') }}
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    ${{ each input in parameters.inputs }}:
+      ${{ format('ALGO_INPUT_{0}', input.key) }}: ${{ input.value }}
+    ${{ each e in parameters.env }}:
+      ${{ e.key }}: ${{ e.value }}

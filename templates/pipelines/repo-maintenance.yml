@@ -1,0 +1,66 @@
+# AL-Go repository maintenance actions for Azure DevOps (extends template):
+#   IncrementVersionNumber, CreateApp (PTE app / test app / performance test app), AddExistingApp
+# Changes are committed to a new branch and a pull request is created (or committed directly with directCommit).
+#
+# The build service identity needs Contribute, Create branch and Contribute to pull requests on the repository.
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: pool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: variableGroups
+  type: object
+  default: []
+- name: action
+  type: string
+  values: [ IncrementVersionNumber, CreateApp, AddExistingApp ]
+- name: workflowName
+  type: string
+  default: ''
+- name: inputs              # inputs of the AL-Go action (see the action's action.yaml)
+  type: object
+  default: {}
+
+variables:
+- ${{ each group in parameters.variableGroups }}:
+  - group: ${{ group }}
+- name: ALGO_WORKFLOW_NAME
+  value: ${{ coalesce(parameters.workflowName, parameters.action) }}
+
+jobs:
+- job: ${{ parameters.action }}
+  pool: ${{ parameters.pool }}
+  steps:
+  - template: /templates/steps/setup.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: ReadSettings
+      name: ReadSettings
+      displayName: Read settings
+      shell: ${{ parameters.shell }}
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: ${{ parameters.action }}
+      name: ${{ parameters.action }}
+      shell: ${{ parameters.shell }}
+      inputs: ${{ parameters.inputs }}

@@ -1,0 +1,338 @@
+# Build jobs: one job per build depth (Build1..Build<maxBuildDepth>), each a matrix over the
+# AL-Go projects/build modes of that depth. Equivalent of AL-Go's _BuildALGoProject.yaml.
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+- name: pool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: maxBuildDepth
+  type: number
+  default: 3
+- name: maxParallel
+  type: number
+  default: 0
+- name: secretNames         # names of pipeline (secret) variables made available to AL-Go as secrets
+  type: object
+  default: []
+- name: signArtifacts
+  type: boolean
+  default: true
+- name: useArtifactCache
+  type: boolean
+  default: true
+- name: publishTestResults
+  type: boolean
+  default: true
+- name: publishArtifacts
+  type: boolean
+  default: true
+- name: artifactsNameSuffix
+  type: string
+  default: ''
+- name: timeoutInMinutes
+  type: number
+  default: 360
+- name: lfs
+  type: boolean
+  default: false
+- name: submodules
+  type: string
+  default: 'false'
+
+jobs:
+- ${{ each depth in split('1,2,3,4,5,6,7,8,9', ',') }}:
+  - ${{ if le(depth, parameters.maxBuildDepth) }}:
+    - job: ${{ format('Build{0}', depth) }}
+      displayName: ${{ format('Build (depth {0})', depth) }}
+      dependsOn:
+      - Initialization
+      - ${{ each previous in split('1,2,3,4,5,6,7,8,9', ',') }}:
+        - ${{ if lt(previous, depth) }}:
+          - ${{ format('Build{0}', previous) }}
+      condition: and(not(canceled()), not(failed()), eq(dependencies.Initialization.result, 'Succeeded'), ne(dependencies.Initialization.outputs['AlGoAdo.count${{ depth }}'], '0'))
+      pool: ${{ parameters.pool }}
+      timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+      strategy:
+        matrix: $[ dependencies.Initialization.outputs['AlGoAdo.matrix${{ depth }}'] ]
+        ${{ if gt(parameters.maxParallel, 0) }}:
+          maxParallel: ${{ parameters.maxParallel }}
+      variables:
+        projectDependenciesJson: $[ dependencies.Initialization.outputs['DetermineProjectsToBuild.ProjectDependenciesJson'] ]
+        skippedProjectsJson: $[ dependencies.Initialization.outputs['DetermineProjectsToBuild.SkippedProjectsJson'] ]
+        baselineWorkflowRunId: $[ coalesce(dependencies.Initialization.outputs['DetermineProjectsToBuild.BaselineWorkflowRunId'], '0') ]
+        baselineWorkflowSHA: $[ dependencies.Initialization.outputs['DetermineProjectsToBuild.BaselineWorkflowSHA'] ]
+      steps:
+      - template: /templates/steps/setup.yml
+        parameters:
+          alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+          alGoVersion: ${{ parameters.alGoVersion }}
+          localActionsPath: ${{ parameters.localActionsPath }}
+          shell: ${{ parameters.shell }}
+          lfs: ${{ parameters.lfs }}
+          submodules: ${{ parameters.submodules }}
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: ReadSettings
+          name: ReadSettings
+          displayName: Read settings
+          shell: ${{ parameters.shell }}
+          inputs:
+            project: $(project)
+            buildMode: $(buildMode)
+            get: useCompilerFolder,workspaceCompilation,keyVaultCodesignCertificateName,doNotSignApps,doNotRunTests,doNotRunBcptTests,doNotRunpageScriptingTests,artifact,generateDependencyArtifact,trustedSigning,useGitSubmodules,skipUpgrade
+
+      - task: PowerShell@2
+        displayName: Evaluate build settings
+        inputs:
+          targetType: filePath
+          filePath: $(Pipeline.Workspace)/al-go-ado/src/Set-AlGoAdoJobOutputs.ps1
+          arguments: -Mode BuildSettings -Project '$(project)'
+          pwsh: ${{ eq(parameters.shell, 'pwsh') }}
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: RunHook
+          name: BuildInitializeHook
+          displayName: Run BuildInitialize hook
+          shell: ${{ parameters.shell }}
+          condition: and(succeeded(), eq(variables['algoHasBuildInitializeHook'], 'True'))
+          inputs:
+            project: $(project)
+            hookName: BuildInitialize
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: DetermineBuildProject
+          name: DetermineBuildProject
+          displayName: Determine whether to build project
+          shell: ${{ parameters.shell }}
+          inputs:
+            skippedProjectsJson: $(skippedProjectsJson)
+            project: $(project)
+            baselineWorkflowRunId: $(baselineWorkflowRunId)
+            buildMode: $(buildMode)
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: ReadSecrets
+          name: ReadSecrets
+          displayName: Read secrets
+          shell: ${{ parameters.shell }}
+          condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'))
+          inputs:
+            getSecrets: ${{ format('{0},appDependencySecrets,AZURE_CREDENTIALS', join(',', parameters.secretNames)) }}
+          env:
+            ${{ each s in parameters.secretNames }}:
+              ${{ format('ALGO_SECRET_{0}', s) }}: $(${{ s }})
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: DetermineArtifactUrl
+          name: DetermineArtifactUrl
+          displayName: Determine artifact URL
+          shell: ${{ parameters.shell }}
+          condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'))
+          inputs:
+            project: $(project)
+
+      - ${{ if parameters.useArtifactCache }}:
+        - task: Cache@2
+          displayName: Cache Business Central artifacts
+          condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'), eq(variables['useCompilerFolder'], 'True'), ne(variables['artifactCacheKey'], ''))
+          continueOnError: true
+          inputs:
+            key: '"al-go" | "$(Agent.OS)" | "$(artifactCacheKey)"'
+            path: $(Agent.TempDirectory)/.artifactcache
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: DownloadProjectDependencies
+          name: DownloadProjectDependencies
+          displayName: Download project dependencies
+          shell: ${{ parameters.shell }}
+          condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'))
+          inputs:
+            project: $(project)
+            buildMode: $(buildMode)
+            projectDependenciesJson: $(projectDependenciesJson)
+            baselineWorkflowRunId: $(baselineWorkflowRunId)
+            destinationPath: $(ALGO_WORKSPACE)/.dependencies
+          env:
+            Secrets: $(ReadSecrets.Secrets)
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: DownloadPreviousRelease
+          name: DownloadPreviousRelease
+          displayName: Download previous release
+          shell: ${{ parameters.shell }}
+          condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'), eq(variables['skipUpgrade'], 'False'))
+          inputs:
+            project: $(project)
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: CompileApps
+          name: CompileApps
+          displayName: Compile apps
+          script: Compile.ps1
+          shell: ${{ parameters.shell }}
+          condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'), eq(variables['algoWorkspaceCompilation'], 'True'))
+          inputs:
+            artifact: $(artifact)
+            project: $(project)
+            buildMode: $(buildMode)
+            dependencyAppsJson: $(DownloadProjectDependencies.DownloadedApps)
+            dependencyTestAppsJson: $(DownloadProjectDependencies.DownloadedTestApps)
+            baselineWorkflowRunId: $(baselineWorkflowRunId)
+            baselineWorkflowSHA: $(baselineWorkflowSHA)
+            previousAppsPath: $(DownloadPreviousRelease.PreviousAppsPath)
+          env:
+            Secrets: $(ReadSecrets.Secrets)
+            BuildMode: $(buildMode)
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: RunPipeline
+          name: Build
+          displayName: Build
+          shell: ${{ parameters.shell }}
+          condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'))
+          inputs:
+            artifact: $(artifact)
+            project: $(project)
+            buildMode: $(buildMode)
+            installAppsJson: $(DownloadProjectDependencies.DownloadedApps)
+            installTestAppsJson: $(DownloadProjectDependencies.DownloadedTestApps)
+            baselineWorkflowRunId: $(baselineWorkflowRunId)
+            baselineWorkflowSHA: $(baselineWorkflowSHA)
+            previousAppsPath: $(DownloadPreviousRelease.PreviousAppsPath)
+          env:
+            Secrets: $(ReadSecrets.Secrets)
+            BuildMode: $(buildMode)
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: RunTests
+          name: RunTests
+          displayName: Run tests
+          shell: ${{ parameters.shell }}
+          condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'), eq(variables['runTestsInSeparateAction'], 'True'))
+          inputs:
+            project: $(project)
+            installTestAppsJson: $(DownloadProjectDependencies.DownloadedTestApps)
+          env:
+            Secrets: $(ReadSecrets.Secrets)
+
+      - task: PowerShell@2
+        displayName: Evaluate build outputs
+        condition: succeededOrFailed()
+        inputs:
+          targetType: filePath
+          filePath: $(Pipeline.Workspace)/al-go-ado/src/Set-AlGoAdoJobOutputs.ps1
+          arguments: -Mode BuildOutputs -Project '$(project)'
+          pwsh: ${{ eq(parameters.shell, 'pwsh') }}
+
+      - ${{ if parameters.signArtifacts }}:
+        - template: /templates/steps/action.yml
+          parameters:
+            action: Sign
+            name: Sign
+            displayName: Sign apps
+            shell: ${{ parameters.shell }}
+            condition: and(succeeded(), eq(variables['DetermineBuildProject.BuildIt'], 'True'), eq(variables['doNotSignApps'], 'False'), eq(variables['algoCanSign'], 'True'), eq(variables['algoHasAppFiles'], 'True'))
+            inputs:
+              azureCredentialsJson: fromSecrets:AZURE_CREDENTIALS
+              pathToFiles: $(project)/.buildartifacts/Apps/*.app
+            env:
+              Secrets: $(ReadSecrets.Secrets)
+
+      - ${{ if parameters.publishArtifacts }}:
+        - template: /templates/steps/action.yml
+          parameters:
+            action: CalculateArtifactNames
+            name: CalculateArtifactNames
+            displayName: Calculate artifact names
+            shell: ${{ parameters.shell }}
+            condition: succeededOrFailed()
+            inputs:
+              project: $(project)
+              buildMode: $(buildMode)
+              suffix: ${{ parameters.artifactsNameSuffix }}
+
+        - template: /templates/steps/publish-artifacts.yml
+
+      - ${{ if parameters.publishTestResults }}:
+        - task: PublishTestResults@2
+          displayName: Publish test results
+          condition: and(succeededOrFailed(), eq(variables['algoHasTestResults'], 'True'))
+          inputs:
+            testResultsFormat: JUnit
+            testResultsFiles: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/TestResults.xml
+            testRunTitle: $(projectName) ($(buildMode))
+            mergeTestResults: true
+            failTaskOnFailedTests: false
+        - task: PublishTestResults@2
+          displayName: Publish page scripting test results
+          condition: and(succeededOrFailed(), eq(variables['algoHasPageScriptingTestResults'], 'True'))
+          inputs:
+            testResultsFormat: JUnit
+            testResultsFiles: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/PageScriptingTestResults.xml
+            testRunTitle: $(projectName) ($(buildMode)) - page scripting
+            failTaskOnFailedTests: false
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: AnalyzeTests
+          name: AnalyzeTests
+          displayName: Analyze test results
+          shell: ${{ parameters.shell }}
+          condition: and(succeededOrFailed(), eq(variables['doNotRunTests'], 'False'))
+          inputs:
+            project: $(project)
+            testType: normal
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: AnalyzeTests
+          name: AnalyzeBcptTests
+          displayName: Analyze BCPT test results
+          shell: ${{ parameters.shell }}
+          condition: and(succeededOrFailed(), eq(variables['doNotRunBcptTests'], 'False'))
+          inputs:
+            project: $(project)
+            testType: bcpt
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: AnalyzeTests
+          name: AnalyzePageScriptingTests
+          displayName: Analyze page scripting test results
+          shell: ${{ parameters.shell }}
+          condition: and(succeededOrFailed(), eq(variables['doNotRunpageScriptingTests'], 'False'))
+          inputs:
+            project: $(project)
+            testType: pageScripting
+
+      - template: /templates/steps/action.yml
+        parameters:
+          action: PipelineCleanup
+          name: PipelineCleanup
+          displayName: Cleanup
+          shell: ${{ parameters.shell }}
+          condition: and(always(), eq(variables['DetermineBuildProject.BuildIt'], 'True'))
+          inputs:
+            project: $(project)

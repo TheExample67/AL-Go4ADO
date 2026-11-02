@@ -1,0 +1,64 @@
+# CI for AL-Go4ADO itself: unit tests (Windows PowerShell 5.1 and PowerShell 7) and a smoke test
+# that runs real AL-Go actions through the wrapper.
+trigger:
+  branches:
+    include: [ main ]
+pr:
+  branches:
+    include: [ main ]
+
+parameters:
+- name: alGoVersion
+  type: string
+  default: v10.0
+
+jobs:
+- job: Test
+  pool:
+    vmImage: windows-latest
+  strategy:
+    matrix:
+      WindowsPowerShell:
+        usePwsh: false
+      PowerShell7:
+        usePwsh: true
+  steps:
+  - checkout: self
+    fetchDepth: 1
+
+  - task: PowerShell@2
+    displayName: Install Pester
+    inputs:
+      targetType: inline
+      pwsh: $(usePwsh)
+      script: Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
+
+  - task: PowerShell@2
+    displayName: Unit tests
+    inputs:
+      targetType: inline
+      pwsh: $(usePwsh)
+      script: |
+        Import-Module Pester -MinimumVersion 5.5
+        $config = New-PesterConfiguration
+        $config.Run.Path = 'tests'
+        $config.Run.Exit = $true
+        $config.TestResult.Enabled = $true
+        $config.TestResult.OutputFormat = 'JUnitXml'
+        $config.TestResult.OutputPath = '$(Agent.TempDirectory)/pester.xml'
+        Invoke-Pester -Configuration $config
+
+  - task: PublishTestResults@2
+    condition: succeededOrFailed()
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: $(Agent.TempDirectory)/pester.xml
+      testRunTitle: Unit tests ($(System.JobName))
+
+  - task: PowerShell@2
+    displayName: Smoke test (AL-Go ${{ parameters.alGoVersion }})
+    inputs:
+      targetType: filePath
+      filePath: tests/Invoke-SmokeTest.ps1
+      arguments: -AlGoVersion ${{ parameters.alGoVersion }}
+      pwsh: $(usePwsh)

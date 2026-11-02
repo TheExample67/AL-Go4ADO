@@ -1,0 +1,55 @@
+# AL-Go Create a new app / test app / performance test app - creates a pull request (or direct commit)
+trigger: none
+pr: none
+
+parameters:
+- name: type
+  displayName: App type
+  type: string
+  default: PTE
+  values: [ PTE, Test App, Performance Test App ]
+- name: name
+  displayName: Name
+  type: string
+- name: publisher
+  displayName: Publisher
+  type: string
+- name: idrange
+  displayName: ID range (from..to)
+  type: string
+  default: '50000..99999'
+- name: project
+  displayName: Project
+  type: string
+  default: '.'
+- name: sampleCode
+  displayName: Include sample code
+  type: boolean
+  default: true
+- name: directCommit
+  displayName: Direct commit
+  type: boolean
+  default: false
+
+resources:
+  repositories:
+  - repository: AlGoAdo
+    type: git
+    name: Shared/AL-Go4ADO
+    ref: refs/tags/v1.0.0
+
+extends:
+  template: templates/pipelines/repo-maintenance.yml@AlGoAdo
+  parameters:
+    alGoVersion: v10.0
+    action: CreateApp
+    workflowName: Create a new app
+    inputs:
+      type: ${{ parameters.type }}
+      name: ${{ parameters.name }}
+      publisher: ${{ parameters.publisher }}
+      idrange: ${{ parameters.idrange }}
+      project: ${{ parameters.project }}
+      sampleCode: ${{ parameters.sampleCode }}
+      sampleSuite: ${{ parameters.sampleCode }}
+      directCommit: ${{ parameters.directCommit }}

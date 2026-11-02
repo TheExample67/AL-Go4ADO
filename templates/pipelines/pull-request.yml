@@ -1,0 +1,97 @@
+# AL-Go Pull Request build for Azure DevOps (extends template).
+# Configure it as a Build Validation branch policy on the target branch(es).
+#
+# Differences from CI/CD (same as AL-Go for GitHub):
+#   - workflow name 'Pull Request Handler' (conditional settings)
+#   - apps are not signed, versioning strategy 15 (maxValue + run number) is applied by ReadSettings
+#   - no deployment, no build tag
+#   - incremental builds follow the incrementalBuilds.onPull_Request setting (baseline: last CI/CD build on the target branch)
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: initPool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: buildPool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: variableGroups
+  type: object
+  default: []
+- name: secretNames
+  type: object
+  default:
+  - licenseFileUrl
+  - applicationInsightsConnectionString
+- name: maxBuildDepth
+  type: number
+  default: 3
+- name: maxParallel
+  type: number
+  default: 0
+- name: useArtifactCache
+  type: boolean
+  default: true
+- name: buildTimeoutInMinutes
+  type: number
+  default: 360
+- name: lfs
+  type: boolean
+  default: false
+- name: submodules
+  type: string
+  default: 'false'
+
+variables:
+- ${{ each group in parameters.variableGroups }}:
+  - group: ${{ group }}
+- name: AL_GO_RUN_NUMBER
+  value: $[counter('al-go-run-number', 1)]
+- name: ALGO_WORKFLOW_NAME
+  value: Pull Request Handler
+
+stages:
+- stage: Build
+  displayName: Build
+  jobs:
+  - template: /templates/jobs/initialization.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+      pool: ${{ parameters.initPool }}
+      maxBuildDepth: ${{ parameters.maxBuildDepth }}
+      tagBuild: false
+      lfs: ${{ parameters.lfs }}
+      submodules: ${{ parameters.submodules }}
+
+  - template: /templates/jobs/build.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+      pool: ${{ parameters.buildPool }}
+      maxBuildDepth: ${{ parameters.maxBuildDepth }}
+      maxParallel: ${{ parameters.maxParallel }}
+      secretNames: ${{ parameters.secretNames }}
+      signArtifacts: false
+      useArtifactCache: ${{ parameters.useArtifactCache }}
+      publishTestResults: true
+      timeoutInMinutes: ${{ parameters.buildTimeoutInMinutes }}
+      lfs: ${{ parameters.lfs }}
+      submodules: ${{ parameters.submodules }}

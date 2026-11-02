@@ -1,0 +1,50 @@
+# AL-Go Create Release - select the CI/CD run to release under "Resources" when queuing the pipeline
+trigger: none
+pr: none
+
+parameters:
+- name: tag
+  displayName: Tag (e.g. 1.0.0)
+  type: string
+- name: name
+  displayName: Release name (default = tag)
+  type: string
+  default: ' '
+- name: prerelease
+  displayName: Prerelease
+  type: boolean
+  default: false
+- name: createReleaseBranch
+  displayName: Create release branch (release/<tag>)
+  type: boolean
+  default: false
+- name: updateVersionNumber
+  displayName: New version number after release (e.g. +0.1, empty = no change)
+  type: string
+  default: ' '
+- name: directCommit
+  displayName: Commit version change directly (instead of a pull request)
+  type: boolean
+  default: false
+
+resources:
+  repositories:
+  - repository: AlGoAdo
+    type: git
+    name: Shared/AL-Go4ADO
+    ref: refs/tags/v1.0.0
+  pipelines:
+  - pipeline: cicd                  # alias used by the template
+    source: CICD                    # name of the CI/CD pipeline in Azure DevOps
+
+extends:
+  template: templates/pipelines/create-release.yml@AlGoAdo
+  parameters:
+    alGoVersion: v10.0
+    variableGroups: [ AL-Go ]
+    tag: ${{ parameters.tag }}
+    name: ${{ trim(parameters.name) }}
+    prerelease: ${{ parameters.prerelease }}
+    createReleaseBranch: ${{ parameters.createReleaseBranch }}
+    updateVersionNumber: ${{ trim(parameters.updateVersionNumber) }}
+    directCommit: ${{ parameters.directCommit }}

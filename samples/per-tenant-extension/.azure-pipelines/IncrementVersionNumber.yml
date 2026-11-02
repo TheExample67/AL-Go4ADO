@@ -1,0 +1,34 @@
+# AL-Go Increment Version Number - creates a pull request (or direct commit)
+trigger: none
+pr: none
+
+parameters:
+- name: projects
+  displayName: Projects (comma separated, * = all)
+  type: string
+  default: '*'
+- name: versionNumber
+  displayName: Version number (e.g. +0.1, +1.0 or 2.0)
+  type: string
+- name: directCommit
+  displayName: Direct commit
+  type: boolean
+  default: false
+
+resources:
+  repositories:
+  - repository: AlGoAdo
+    type: git
+    name: Shared/AL-Go4ADO
+    ref: refs/tags/v1.0.0
+
+extends:
+  template: templates/pipelines/repo-maintenance.yml@AlGoAdo
+  parameters:
+    alGoVersion: v10.0
+    action: IncrementVersionNumber
+    workflowName: Increment Version Number
+    inputs:
+      projects: ${{ parameters.projects }}
+      versionNumber: ${{ parameters.versionNumber }}
+      directCommit: ${{ parameters.directCommit }}

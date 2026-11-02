@@ -1,0 +1,106 @@
+# Initialization job: validates the repository, reads settings, determines projects/build order
+# and deployment environments. Publishes build matrices (AlGoAdo.matrix<N>) for templates/jobs/build.yml.
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+- name: pool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: maxBuildDepth
+  type: number
+  default: 3
+- name: environments        # list of { name, adoEnvironment?, variableGroup?, pool? }
+  type: object
+  default: []
+- name: deploymentType      # CD (continuous deployment) or Publish
+  type: string
+  default: CD
+- name: tagBuild            # tag the run as an AL-Go CI/CD build (used for "last known good build" and latestBuild dependencies)
+  type: boolean
+  default: false
+- name: lfs
+  type: boolean
+  default: false
+- name: submodules
+  type: string
+  default: 'false'
+
+jobs:
+- job: Initialization
+  displayName: Initialization
+  pool: ${{ parameters.pool }}
+  variables:
+    ALGO_ENVIRONMENTS: ${{ convertToJson(parameters.environments) }}
+  steps:
+  - template: /templates/steps/setup.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+      lfs: ${{ parameters.lfs }}
+      submodules: ${{ parameters.submodules }}
+
+  - ${{ if parameters.tagBuild }}:
+    - powershell: Write-Host "##vso[build.addbuildtag]AL-Go-CICD"
+      displayName: Tag build as AL-Go CI/CD
+      condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: WorkflowInitialize
+      name: WorkflowInitialize
+      displayName: Initialize the workflow
+      shell: ${{ parameters.shell }}
+      inputs:
+        actionsRepo: microsoft/AL-Go-Actions
+        actionsRef: ${{ parameters.alGoVersion }}
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: ReadSettings
+      name: ReadSettings
+      displayName: Read settings
+      shell: ${{ parameters.shell }}
+      inputs:
+        get: type,powerPlatformSolutionFolder,useGitSubmodules
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: DetermineProjectsToBuild
+      name: DetermineProjectsToBuild
+      displayName: Determine projects to build
+      shell: ${{ parameters.shell }}
+      inputs:
+        maxBuildDepth: ${{ parameters.maxBuildDepth }}
+
+  - ${{ if gt(length(parameters.environments), 0) }}:
+    - template: /templates/steps/action.yml
+      parameters:
+        action: DetermineDeploymentEnvironments
+        name: DetermineDeploymentEnvironments
+        displayName: Determine deployment environments
+        shell: ${{ parameters.shell }}
+        inputs:
+          getEnvironments: '*'
+          type: ${{ parameters.deploymentType }}
+
+  - task: PowerShell@2
+    name: AlGoAdo
+    displayName: Publish build matrix
+    inputs:
+      targetType: filePath
+      filePath: $(Pipeline.Workspace)/al-go-ado/src/Set-AlGoAdoJobOutputs.ps1
+      arguments: -Mode Initialization -MaxBuildDepth ${{ parameters.maxBuildDepth }}
+      pwsh: ${{ eq(parameters.shell, 'pwsh') }}

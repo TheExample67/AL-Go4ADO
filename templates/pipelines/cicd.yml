@@ -1,0 +1,146 @@
+# AL-Go CI/CD pipeline for Azure DevOps (extends template).
+#
+# Usage (in the AL-Go repository):
+#   resources:
+#     repositories:
+#     - repository: AlGoAdo
+#       type: git                 # or github (with endpoint)
+#       name: <project>/AL-Go4ADO
+#       ref: refs/tags/v1.0.0
+#   extends:
+#     template: templates/pipelines/cicd.yml@AlGoAdo
+#     parameters: { ... }
+parameters:
+- name: alGoAdoRepository   # alias of the AL-Go4ADO repository resource
+  type: string
+  default: AlGoAdo
+- name: alGoVersion         # microsoft/AL-Go-Actions ref (version branch, tag or commit SHA)
+  type: string
+  default: v10.0
+- name: localActionsPath    # optional vendored AL-Go actions folder in the repository (offline agents)
+  type: string
+  default: ''
+- name: workflowName        # AL-Go workflow name, used for workflow specific settings (conditionalSettings)
+  type: string
+  default: CI/CD
+- name: shell               # powershell (Windows PowerShell 5.1) or pwsh (PowerShell 7)
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: initPool            # pool for the light-weight jobs (Microsoft-hosted or self-hosted)
+  type: object
+  default:
+    vmImage: windows-latest
+- name: buildPool           # pool for the build jobs; use a self-hosted pool with Docker for container builds
+  type: object
+  default:
+    vmImage: windows-latest
+- name: deployPool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: variableGroups      # variable groups with secrets and ALGoOrgSettings/ALGoRepoSettings
+  type: object
+  default: []
+- name: secretNames         # pipeline variables that are passed to AL-Go as secrets
+  type: object
+  default:
+  - AZURE_CREDENTIALS
+  - licenseFileUrl
+  - codeSignCertificateUrl
+  - codeSignCertificatePassword
+  - keyVaultCertificateUrl
+  - keyVaultCertificatePassword
+  - keyVaultClientId
+  - applicationInsightsConnectionString
+  - storageContext
+  - nuGetContext
+  - gitHubPackagesContext
+  - appSourceContext
+- name: environments        # deployment environments, see templates/stages/deploy.yml
+  type: object
+  default: []
+- name: maxBuildDepth
+  type: number
+  default: 3
+- name: maxParallel
+  type: number
+  default: 0
+- name: signArtifacts
+  type: boolean
+  default: true
+- name: useArtifactCache
+  type: boolean
+  default: true
+- name: publishTestResults
+  type: boolean
+  default: true
+- name: artifactsNameSuffix
+  type: string
+  default: ''
+- name: buildTimeoutInMinutes
+  type: number
+  default: 360
+- name: tagBuild            # mark runs as AL-Go CI/CD builds (last known good build, releases, latestBuild dependencies)
+  type: boolean
+  default: true
+- name: lfs
+  type: boolean
+  default: false
+- name: submodules
+  type: string
+  default: 'false'
+
+variables:
+- ${{ each group in parameters.variableGroups }}:
+  - group: ${{ group }}
+- name: AL_GO_RUN_NUMBER
+  value: $[counter('al-go-run-number', 1)]
+- name: ALGO_WORKFLOW_NAME
+  value: ${{ parameters.workflowName }}
+
+stages:
+- stage: Build
+  displayName: Build
+  jobs:
+  - template: /templates/jobs/initialization.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+      pool: ${{ parameters.initPool }}
+      maxBuildDepth: ${{ parameters.maxBuildDepth }}
+      environments: ${{ parameters.environments }}
+      tagBuild: ${{ parameters.tagBuild }}
+      lfs: ${{ parameters.lfs }}
+      submodules: ${{ parameters.submodules }}
+
+  - template: /templates/jobs/build.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+      pool: ${{ parameters.buildPool }}
+      maxBuildDepth: ${{ parameters.maxBuildDepth }}
+      maxParallel: ${{ parameters.maxParallel }}
+      secretNames: ${{ parameters.secretNames }}
+      signArtifacts: ${{ parameters.signArtifacts }}
+      useArtifactCache: ${{ parameters.useArtifactCache }}
+      publishTestResults: ${{ parameters.publishTestResults }}
+      artifactsNameSuffix: ${{ parameters.artifactsNameSuffix }}
+      timeoutInMinutes: ${{ parameters.buildTimeoutInMinutes }}
+      lfs: ${{ parameters.lfs }}
+      submodules: ${{ parameters.submodules }}
+
+- ${{ if gt(length(parameters.environments), 0) }}:
+  - template: /templates/stages/deploy.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+      pool: ${{ parameters.deployPool }}
+      environments: ${{ parameters.environments }}
+      secretNames: ${{ parameters.secretNames }}

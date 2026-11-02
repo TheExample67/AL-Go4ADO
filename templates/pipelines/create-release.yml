@@ -1,0 +1,102 @@
+# AL-Go Create Release for Azure DevOps (extends template).
+#
+# The consumer pipeline declares the CI/CD pipeline as a pipeline resource; the run to release is the
+# run selected in the "Resources" picker when queuing (default: latest successful run).
+# See samples/per-tenant-extension/.azure-pipelines/CreateRelease.yml
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: pool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: variableGroups
+  type: object
+  default: []
+- name: cicdPipeline        # alias of the CI/CD pipeline resource
+  type: string
+  default: cicd
+- name: buildId             # explicit CI/CD run id (overrides the pipeline resource)
+  type: string
+  default: ''
+- name: tag
+  type: string
+- name: name
+  type: string
+  default: ''
+- name: prerelease
+  type: boolean
+  default: false
+- name: createReleaseBranch
+  type: boolean
+  default: false
+- name: updateVersionNumber # e.g. +0.1 or 2.0 - creates a PR (or direct commit) incrementing the version after the release
+  type: string
+  default: ''
+- name: directCommit
+  type: boolean
+  default: false
+
+variables:
+- ${{ each group in parameters.variableGroups }}:
+  - group: ${{ group }}
+- name: ALGO_WORKFLOW_NAME
+  value: Create release
+
+jobs:
+- job: CreateRelease
+  displayName: ${{ format('Create release {0}', parameters.tag) }}
+  pool: ${{ parameters.pool }}
+  steps:
+  - download: none
+  - template: /templates/steps/setup.yml
+    parameters:
+      alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+      alGoVersion: ${{ parameters.alGoVersion }}
+      localActionsPath: ${{ parameters.localActionsPath }}
+      shell: ${{ parameters.shell }}
+
+  - template: /templates/steps/action.yml
+    parameters:
+      action: ReadSettings
+      name: ReadSettings
+      displayName: Read settings
+      shell: ${{ parameters.shell }}
+
+  - task: PowerShell@2
+    displayName: Create release
+    inputs:
+      targetType: filePath
+      filePath: $(Pipeline.Workspace)/al-go-ado/src/New-AlGoAdoRelease.ps1
+      arguments: >-
+        -BuildId '${{ coalesce(parameters.buildId, format('$(resources.pipeline.{0}.runID)', parameters.cicdPipeline)) }}'
+        -Tag '${{ parameters.tag }}'
+        -Name '${{ coalesce(parameters.name, parameters.tag) }}'
+        -Prerelease '${{ parameters.prerelease }}'
+        -CreateReleaseBranch '${{ parameters.createReleaseBranch }}'
+      pwsh: ${{ eq(parameters.shell, 'pwsh') }}
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  - ${{ if ne(parameters.updateVersionNumber, '') }}:
+    - template: /templates/steps/action.yml
+      parameters:
+        action: IncrementVersionNumber
+        name: IncrementVersionNumber
+        displayName: Increment version number
+        shell: ${{ parameters.shell }}
+        inputs:
+          projects: '*'
+          versionNumber: ${{ parameters.updateVersionNumber }}
+          directCommit: ${{ parameters.directCommit }}

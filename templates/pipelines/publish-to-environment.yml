@@ -1,0 +1,118 @@
+# AL-Go Publish To Environment for Azure DevOps (extends template).
+# Deploys 'latest' release, a release tag, 'prerelease' or the latest CI/CD build ('current') to one environment.
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: pool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: variableGroups
+  type: object
+  default: []
+- name: environment         # { name, adoEnvironment?, variableGroup?, secretPrefix? }
+  type: object
+- name: appVersion          # current | prerelease | latest | <release tag>
+  type: string
+  default: latest
+- name: buildMode
+  type: string
+  default: Default
+
+variables:
+- ${{ each group in parameters.variableGroups }}:
+  - group: ${{ group }}
+- name: ALGO_WORKFLOW_NAME
+  value: Publish To Environment
+
+jobs:
+- deployment: Publish
+  displayName: ${{ format('Publish {0} to {1}', parameters.appVersion, parameters.environment.name) }}
+  environment: ${{ coalesce(parameters.environment.adoEnvironment, parameters.environment.name) }}
+  pool: ${{ parameters.pool }}
+  variables:
+  - ${{ if parameters.environment.variableGroup }}:
+    - group: ${{ parameters.environment.variableGroup }}
+  - name: ALGO_ENVIRONMENTS
+    value: ${{ convertToJson(parameters.environment) }}
+  - name: ALGoEnvName
+    value: ${{ parameters.environment.name }}
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - download: none
+        - template: /templates/steps/setup.yml
+          parameters:
+            alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+            alGoVersion: ${{ parameters.alGoVersion }}
+            localActionsPath: ${{ parameters.localActionsPath }}
+            shell: ${{ parameters.shell }}
+            fetchDepth: 1
+
+        - template: /templates/steps/action.yml
+          parameters:
+            action: ReadSettings
+            name: ReadSettings
+            displayName: Read settings
+            shell: ${{ parameters.shell }}
+
+        - template: /templates/steps/action.yml
+          parameters:
+            action: DetermineDeploymentEnvironments
+            name: DetermineDeploymentEnvironments
+            displayName: Determine deployment environment
+            shell: ${{ parameters.shell }}
+            inputs:
+              getEnvironments: ${{ parameters.environment.name }}
+              type: Publish
+
+        - template: /templates/steps/action.yml
+          parameters:
+            action: ReadSecrets
+            name: ReadSecrets
+            displayName: Read secrets
+            shell: ${{ parameters.shell }}
+            inputs:
+              getSecrets: ${{ format('{0}-AuthContext,{0}_AuthContext,AuthContext', coalesce(parameters.environment.secretPrefix, parameters.environment.name)) }}
+            env:
+              ${{ format('ALGO_SECRET_{0}-AuthContext', coalesce(parameters.environment.secretPrefix, parameters.environment.name)) }}: ${{ format('$({0}-AuthContext)', coalesce(parameters.environment.secretPrefix, parameters.environment.name)) }}
+              ${{ format('ALGO_SECRET_{0}_AuthContext', coalesce(parameters.environment.secretPrefix, parameters.environment.name)) }}: ${{ format('$({0}_AuthContext)', coalesce(parameters.environment.secretPrefix, parameters.environment.name)) }}
+              ALGO_SECRET_AuthContext: $(AuthContext)
+
+        - template: /templates/steps/action.yml
+          parameters:
+            action: GetArtifactsForDeployment
+            name: GetArtifactsForDeployment
+            displayName: Get artifacts for deployment
+            shell: ${{ parameters.shell }}
+            inputs:
+              artifactsVersion: ${{ parameters.appVersion }}
+              artifactsFolder: .artifacts
+              buildMode: ${{ parameters.buildMode }}
+
+        - template: /templates/steps/action.yml
+          parameters:
+            action: Deploy
+            name: Deploy
+            displayName: ${{ format('Deploy to {0}', parameters.environment.name) }}
+            shell: ${{ parameters.shell }}
+            inputs:
+              environmentName: ${{ parameters.environment.name }}
+              artifactsFolder: .artifacts
+              type: Publish
+              deploymentEnvironmentsJson: $(DetermineDeploymentEnvironments.DeploymentEnvironmentsJson)
+              artifactsVersion: ${{ parameters.appVersion }}
+            env:
+              Secrets: $(ReadSecrets.Secrets)

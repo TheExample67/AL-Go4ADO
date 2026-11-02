@@ -1,0 +1,79 @@
+# Publishes AL-Go build outputs as pipeline artifacts (names from CalculateArtifactNames).
+# Requires the 'Evaluate build outputs' step (Set-AlGoAdoJobOutputs.ps1 -Mode BuildOutputs) to have run.
+steps:
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - apps
+  condition: and(succeeded(), eq(variables['algoHasApps'], 'True'))
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/Apps
+    artifact: $(CalculateArtifactNames.AppsArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - dependencies
+  condition: and(succeeded(), eq(variables['generateDependencyArtifact'], 'True'), eq(variables['algoHasDependencies'], 'True'))
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/Dependencies
+    artifact: $(CalculateArtifactNames.DependenciesArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - test apps
+  condition: and(succeeded(), eq(variables['algoHasTestApps'], 'True'))
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/TestApps
+    artifact: $(CalculateArtifactNames.TestAppsArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - build output
+  condition: and(succeededOrFailed(), eq(variables['algoHasBuildOutput'], 'True'))
+  continueOnError: true
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/BuildOutput.txt
+    artifact: $(CalculateArtifactNames.BuildOutputArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - container event log
+  condition: and(failed(), eq(variables['algoHasContainerEventLog'], 'True'))
+  continueOnError: true
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/ContainerEventLog.evtx
+    artifact: $(CalculateArtifactNames.ContainerEventLogArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - test results
+  condition: and(succeededOrFailed(), eq(variables['algoHasTestResults'], 'True'))
+  continueOnError: true
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/TestResults.xml
+    artifact: $(CalculateArtifactNames.TestResultsArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - BCPT test results
+  condition: and(succeededOrFailed(), eq(variables['algoHasBcptTestResults'], 'True'))
+  continueOnError: true
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/bcptTestResults.json
+    artifact: $(CalculateArtifactNames.BcptTestResultsArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - page scripting test results
+  condition: and(succeededOrFailed(), eq(variables['algoHasPageScriptingTestResults'], 'True'))
+  continueOnError: true
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/PageScriptingTestResults.xml
+    artifact: $(CalculateArtifactNames.PageScriptingTestResultsArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - page scripting test result details
+  condition: and(succeededOrFailed(), eq(variables['algoHasPageScriptingTestResultDetails'], 'True'))
+  continueOnError: true
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/PageScriptingTestResultDetails
+    artifact: $(CalculateArtifactNames.PageScriptingTestResultDetailsArtifactsName)
+
+- task: PublishPipelineArtifact@1
+  displayName: Publish artifacts - AL code analysis logs
+  condition: and(succeededOrFailed(), eq(variables['algoHasErrorLogs'], 'True'))
+  continueOnError: true
+  inputs:
+    targetPath: $(ALGO_WORKSPACE)/$(project)/.buildartifacts/ErrorLogs
+    artifact: $(CalculateArtifactNames.ErrorLogsArtifactsName)

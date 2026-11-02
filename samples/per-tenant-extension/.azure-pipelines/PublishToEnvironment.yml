@@ -1,0 +1,32 @@
+# AL-Go Publish To Environment
+trigger: none
+pr: none
+
+parameters:
+- name: appVersion
+  displayName: App version (latest, prerelease, current or a release tag)
+  type: string
+  default: latest
+- name: environment
+  displayName: Environment
+  type: string
+  default: QA
+  values: [ QA, PROD ]
+
+resources:
+  repositories:
+  - repository: AlGoAdo
+    type: git
+    name: Shared/AL-Go4ADO
+    ref: refs/tags/v1.0.0
+
+extends:
+  template: templates/pipelines/publish-to-environment.yml@AlGoAdo
+  parameters:
+    alGoVersion: v10.0
+    variableGroups: [ AL-Go ]
+    appVersion: ${{ parameters.appVersion }}
+    environment:
+      name: ${{ parameters.environment }}
+      adoEnvironment: ${{ format('BC-{0}', parameters.environment) }}
+      variableGroup: ${{ format('AL-Go-{0}', parameters.environment) }}

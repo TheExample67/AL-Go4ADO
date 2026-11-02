@@ -1,0 +1,15 @@
+# AL-Go Pull Request build - add this pipeline as Build Validation in the branch policies of main / release/*
+trigger: none
+
+resources:
+  repositories:
+  - repository: AlGoAdo
+    type: git
+    name: Shared/AL-Go4ADO
+    ref: refs/tags/v1.0.0
+
+extends:
+  template: templates/pipelines/pull-request.yml@AlGoAdo
+  parameters:
+    alGoVersion: v10.0
+    variableGroups: [ AL-Go ]

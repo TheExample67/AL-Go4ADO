@@ -1,0 +1,139 @@
+# Deploy stage: one deployment job per environment, gated by AL-Go's DetermineDeploymentEnvironments
+# (DeployTo<env> settings: branches, continuousDeployment, projects, ...) and by the approvals and
+# checks configured on the Azure DevOps environment.
+#
+# environments: list of objects
+#   name:            AL-Go environment name (matches DeployTo<name> settings and <name>-AuthContext secrets)
+#   adoEnvironment:  Azure DevOps environment (default: name)
+#   variableGroup:   optional variable group with environment-specific secrets (e.g. <name>-AuthContext)
+#   pool:            optional pool override
+#   secretPrefix:    prefix of the AuthContext secret (<prefix>-AuthContext / <prefix>_AuthContext), default: name
+# Environment names may contain letters, digits, '_', ' ', '-', '.', '(' and ')'.
+parameters:
+- name: alGoAdoRepository
+  type: string
+  default: AlGoAdo
+- name: alGoVersion
+  type: string
+  default: v10.0
+- name: localActionsPath
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+- name: pool
+  type: object
+  default:
+    vmImage: windows-latest
+- name: environments
+  type: object
+  default: []
+- name: secretNames
+  type: object
+  default: []
+- name: dependsOn
+  type: string
+  default: Build
+- name: initializationStage
+  type: string
+  default: Build
+
+stages:
+- stage: Deploy
+  displayName: Deploy
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+  jobs:
+  - ${{ each environment in parameters.environments }}:
+    - deployment: ${{ format('Deploy_{0}', replace(replace(replace(replace(replace(environment.name, ' ', '_'), '-', '_'), '.', '_'), '(', '_'), ')', '_')) }}
+      displayName: ${{ format('Deploy to {0}', environment.name) }}
+      condition: and(succeeded(), eq(stageDependencies.${{ parameters.initializationStage }}.Initialization.outputs['AlGoAdo.${{ format('deploy_{0}', replace(replace(replace(replace(replace(environment.name, ' ', '_'), '-', '_'), '.', '_'), '(', '_'), ')', '_')) }}'], 'True'))
+      environment: ${{ coalesce(environment.adoEnvironment, environment.name) }}
+      ${{ if environment.pool }}:
+        pool: ${{ environment.pool }}
+      ${{ else }}:
+        pool: ${{ parameters.pool }}
+      variables:
+      - ${{ if environment.variableGroup }}:
+        - group: ${{ environment.variableGroup }}
+      - name: ALGO_ENVIRONMENTS
+        value: ${{ convertToJson(parameters.environments) }}
+      - name: ALGoEnvName
+        value: ${{ environment.name }}
+      - name: deploymentEnvironmentsJson
+        value: $[ stageDependencies.${{ parameters.initializationStage }}.Initialization.outputs['DetermineDeploymentEnvironments.DeploymentEnvironmentsJson'] ]
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - download: none
+            - template: /templates/steps/setup.yml
+              parameters:
+                alGoAdoRepository: ${{ parameters.alGoAdoRepository }}
+                alGoVersion: ${{ parameters.alGoVersion }}
+                localActionsPath: ${{ parameters.localActionsPath }}
+                shell: ${{ parameters.shell }}
+                fetchDepth: 1
+
+            - task: DownloadPipelineArtifact@2
+              displayName: Download artifacts
+              inputs:
+                buildType: current
+                itemPattern: |
+                  *Apps-*/**
+                  *Dependencies-*/**
+                  *PowerPlatformSolution-*/**
+                path: $(ALGO_WORKSPACE)/.artifacts
+
+            - template: /templates/steps/action.yml
+              parameters:
+                action: ReadSettings
+                name: ReadSettings
+                displayName: Read settings
+                shell: ${{ parameters.shell }}
+                inputs:
+                  get: type,powerPlatformSolutionFolder
+
+            - template: /templates/steps/action.yml
+              parameters:
+                action: ReadSecrets
+                name: ReadSecrets
+                displayName: Read secrets
+                shell: ${{ parameters.shell }}
+                inputs:
+                  getSecrets: ${{ format('{0}-AuthContext,{0}_AuthContext,AuthContext', coalesce(environment.secretPrefix, environment.name)) }}
+                env:
+                  ${{ format('ALGO_SECRET_{0}-AuthContext', coalesce(environment.secretPrefix, environment.name)) }}: ${{ format('$({0}-AuthContext)', coalesce(environment.secretPrefix, environment.name)) }}
+                  ${{ format('ALGO_SECRET_{0}_AuthContext', coalesce(environment.secretPrefix, environment.name)) }}: ${{ format('$({0}_AuthContext)', coalesce(environment.secretPrefix, environment.name)) }}
+                  ALGO_SECRET_AuthContext: $(AuthContext)
+                  ${{ each s in parameters.secretNames }}:
+                    ${{ format('ALGO_SECRET_{0}', s) }}: $(${{ s }})
+
+            - template: /templates/steps/action.yml
+              parameters:
+                action: Deploy
+                name: Deploy
+                displayName: ${{ format('Deploy to {0}', environment.name) }}
+                shell: ${{ parameters.shell }}
+                inputs:
+                  environmentName: ${{ environment.name }}
+                  artifactsFolder: .artifacts
+                  type: CD
+                  deploymentEnvironmentsJson: $(deploymentEnvironmentsJson)
+                env:
+                  Secrets: $(ReadSecrets.Secrets)
+
+            - template: /templates/steps/action.yml
+              parameters:
+                action: DeployPowerPlatform
+                name: DeployPowerPlatform
+                displayName: Deploy to Power Platform
+                shell: powershell
+                condition: and(succeeded(), eq(variables['type'], 'PTE'), ne(variables['powerPlatformSolutionFolder'], ''))
+                inputs:
+                  environmentName: ${{ environment.name }}
+                  artifactsFolder: .artifacts
+                  deploymentEnvironmentsJson: $(deploymentEnvironmentsJson)
+                env:
+                  Secrets: $(ReadSecrets.Secrets)

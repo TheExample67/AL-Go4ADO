@@ -1,0 +1,26 @@
+# AL-Go CI/CD
+trigger:
+  branches:
+    include: [ main, release/* ]
+  paths:
+    exclude: [ '**/*.md' ]
+pr: none
+
+resources:
+  repositories:
+  - repository: AlGoAdo
+    type: git                       # Azure Repos repository containing AL-Go4ADO (or type: github + endpoint)
+    name: Shared/AL-Go4ADO          # <project>/<repository>
+    ref: refs/tags/v1.0.0           # pin a version of AL-Go4ADO
+
+extends:
+  template: templates/pipelines/cicd.yml@AlGoAdo
+  parameters:
+    alGoVersion: v10.0              # microsoft/AL-Go-Actions version (branch, tag or commit SHA)
+    variableGroups: [ AL-Go ]       # secrets (licenseFileUrl, AZURE_CREDENTIALS, ...) and ALGoOrgSettings / ALGoRepoSettings
+    buildPool:
+      vmImage: windows-latest       # or: name: 'BC Build Agents' (self-hosted pool with Docker)
+    environments:
+    - name: QA                      # AL-Go environment (DeployToQA setting, QA-AuthContext secret)
+      adoEnvironment: BC-QA         # Azure DevOps environment (approvals & checks)
+      variableGroup: AL-Go-QA       # optional, environment-specific secrets

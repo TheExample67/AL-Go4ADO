@@ -1,0 +1,27 @@
+# AL-Go Test Next Minor - builds against the next minor version of Business Central
+# (settings from .github/Test Next Minor.settings.json). Use Test Current / Test Next Major the same way.
+trigger: none
+pr: none
+schedules:
+- cron: '0 2 * * 6'               # Saturdays 02:00 UTC
+  displayName: Weekly
+  branches:
+    include: [ main ]
+  always: true
+
+resources:
+  repositories:
+  - repository: AlGoAdo
+    type: git
+    name: Shared/AL-Go4ADO
+    ref: refs/tags/v1.0.0
+
+extends:
+  template: templates/pipelines/cicd.yml@AlGoAdo
+  parameters:
+    alGoVersion: v10.0
+    workflowName: Test Next Minor
+    artifactsNameSuffix: NextMinor
+    variableGroups: [ AL-Go ]
+    tagBuild: false
+    signArtifacts: false

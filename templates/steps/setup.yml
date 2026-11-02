@@ -1,0 +1,56 @@
+# Checks out the AL-Go repository (self) and AL-Go4ADO, and prepares the AL-Go actions on the agent.
+# Sets ALGO_ACTIONS_PATH, ALGO_ADO_SRC and ALGO_WORKSPACE for the rest of the job.
+parameters:
+- name: alGoAdoRepository   # alias of the repository resource pointing to AL-Go4ADO
+  type: string
+  default: AlGoAdo
+- name: alGoVersion         # ref of microsoft/AL-Go-Actions (version branch, tag or commit SHA)
+  type: string
+  default: v10.0
+- name: localActionsPath    # optional vendored copy of the AL-Go actions (relative to the repository root)
+  type: string
+  default: ''
+- name: shell
+  type: string
+  default: powershell
+  values: [ powershell, pwsh ]
+- name: checkoutSelf
+  type: boolean
+  default: true
+- name: fetchDepth
+  type: number
+  default: 0
+- name: lfs
+  type: boolean
+  default: false
+- name: submodules          # false | true | recursive
+  type: string
+  default: 'false'
+
+steps:
+- ${{ if parameters.checkoutSelf }}:
+  - checkout: self
+    path: self
+    clean: true
+    fetchDepth: ${{ parameters.fetchDepth }}
+    lfs: ${{ parameters.lfs }}
+    persistCredentials: true
+    ${{ if ne(parameters.submodules, 'false') }}:
+      submodules: ${{ parameters.submodules }}
+
+- checkout: ${{ parameters.alGoAdoRepository }}
+  path: al-go-ado
+  fetchDepth: 1
+  clean: true
+
+- task: PowerShell@2
+  displayName: Initialize AL-Go for Azure DevOps
+  inputs:
+    targetType: filePath
+    filePath: $(Pipeline.Workspace)/al-go-ado/src/Initialize-AlGoAdo.ps1
+    arguments: >-
+      -AlGoVersion '${{ parameters.alGoVersion }}'
+      -LocalActionsPath '${{ parameters.localActionsPath }}'
+      -Workspace '$(Pipeline.Workspace)/self'
+    workingDirectory: $(Pipeline.Workspace)/self
+    pwsh: ${{ eq(parameters.shell, 'pwsh') }}
