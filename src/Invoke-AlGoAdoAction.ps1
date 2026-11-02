@@ -80,13 +80,12 @@ $summaryFile = Join-Path $stateFolder "$stepId.summary.md"
 foreach ($f in @($outputFile, $envFile, $summaryFile)) { New-Item -Path $f -ItemType File -Force | Out-Null }
 
 # Remove unresolved ADO macros like "$(ReadSecrets.Secrets)" from the environment
-Get-ChildItem env: | Where-Object { $_.Value -match '^\$\([^)]+\)$' } | ForEach-Object { Remove-Item "env:$($_.Name)" }
+# (Set-ProcessEnvironmentVariable instead of Set-Item/Remove-Item: the agent creates variables with
+# empty values, e.g. inputs that resolve to '', which Windows PowerShell can list but not remove.)
+Get-ChildItem env: | Where-Object { $_.Value -match '^\$\([^)]+\)$' } | ForEach-Object { Set-ProcessEnvironmentVariable $_.Name $null }
 
-foreach ($key in $state.env.Keys) { Set-Item -Path "env:$key" -Value "$($state.env[$key])" }
-foreach ($key in $gitHubEnv.Keys) {
-    if ("$($gitHubEnv[$key])") { Set-Item -Path "env:$key" -Value "$($gitHubEnv[$key])" }
-    else { Remove-Item "env:$key" -ErrorAction SilentlyContinue }
-}
+foreach ($key in $state.env.Keys) { Set-ProcessEnvironmentVariable $key "$($state.env[$key])" }
+foreach ($key in $gitHubEnv.Keys) { Set-ProcessEnvironmentVariable $key "$($gitHubEnv[$key])" }
 $env:GITHUB_OUTPUT = $outputFile
 $env:GITHUB_ENV = $envFile
 $env:GITHUB_STEP_SUMMARY = $summaryFile
@@ -107,7 +106,7 @@ if (-not $scriptPath -or -not (Test-Path $scriptPath)) { throw "No script found 
 $inputs = @{}
 Get-ChildItem env: | Where-Object { $_.Name -like 'ALGO_INPUT_*' } | ForEach-Object {
     $inputs[$_.Name.Substring(11)] = $_.Value
-    Remove-Item "env:$($_.Name)"
+    Set-ProcessEnvironmentVariable $_.Name $null
 }
 # Inputs of the form "fromSecrets:<name>" are resolved from the Secrets JSON produced by ReadSecrets
 # (the ADO equivalent of fromJson(steps.ReadSecrets.outputs.Secrets).<name>)
@@ -128,7 +127,7 @@ if ($Action -eq 'ReadSecrets' -and -not ($inputs.Keys | Where-Object { $_ -ieq '
     $secretValues = [ordered]@{}
     Get-ChildItem env: | Where-Object { $_.Name -like 'ALGO_SECRET_*' } | ForEach-Object {
         if ($_.Value) { $secretValues[$_.Name.Substring(12)] = $_.Value }
-        Remove-Item "env:$($_.Name)"
+        Set-ProcessEnvironmentVariable $_.Name $null
     }
     if ($env:SYSTEM_ACCESSTOKEN) { $secretValues['github_token'] = $env:SYSTEM_ACCESSTOKEN }
     Write-Host "Secrets available to ReadSecrets: $(@($secretValues.Keys | Where-Object { $_ -ne 'github_token' }) -join ', ')"
@@ -140,15 +139,15 @@ $defaults = Get-ActionInputDefault -ActionFolder $actionFolder
 $defaults['token'] = $env:SYSTEM_ACCESSTOKEN
 $defaults['actor'] = $gitHubEnv.GITHUB_ACTOR
 $defaults['baseFolder'] = $Workspace
-Get-ChildItem env: | Where-Object { $_.Name -like 'ALGO_PARAM_*' } | ForEach-Object { Remove-Item "env:$($_.Name)" }
+Get-ChildItem env: | Where-Object { $_.Name -like 'ALGO_PARAM_*' } | ForEach-Object { Set-ProcessEnvironmentVariable $_.Name $null }
 foreach ($name in $scriptParameters.Keys) {
     if ([System.Management.Automation.Cmdlet]::CommonParameters -contains $name) { continue }
     $inputKey = $inputs.Keys | Where-Object { $_ -ieq $name } | Select-Object -First 1
     if ($inputKey) {
-        Set-Item -Path "env:ALGO_PARAM_$name" -Value $inputs[$inputKey]
+        Set-ProcessEnvironmentVariable "ALGO_PARAM_$name" $inputs[$inputKey]
     }
     elseif ($defaults.ContainsKey($name) -and $defaults[$name]) {
-        Set-Item -Path "env:ALGO_PARAM_$name" -Value $defaults[$name]
+        Set-ProcessEnvironmentVariable "ALGO_PARAM_$name" $defaults[$name]
     }
 }
 foreach ($inputKey in $inputs.Keys) {

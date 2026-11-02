@@ -23,7 +23,7 @@ $declared = (Get-Command $ScriptPath).Parameters
 Get-ChildItem env: | Where-Object { $_.Name -like 'ALGO_PARAM_*' } | ForEach-Object {
     $name = $_.Name.Substring(11)
     $value = $_.Value
-    Remove-Item "env:$($_.Name)"
+    [Environment]::SetEnvironmentVariable($_.Name, [System.Management.Automation.Language.NullString]::Value, [EnvironmentVariableTarget]::Process)
     $paramName = $declared.Keys | Where-Object { $_ -ieq $name } | Select-Object -First 1
     if (-not $paramName) { return }
     $type = $declared[$paramName].ParameterType

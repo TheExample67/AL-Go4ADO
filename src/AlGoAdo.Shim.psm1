@@ -20,6 +20,23 @@ function Get-EnvValue([hashtable] $AdoEnv, [string] $Name, [string] $Default = '
     return $Default
 }
 
+<#
+    .SYNOPSIS
+    Sets (or with an empty value: removes) a process environment variable.
+    Unlike Set-Item/Remove-Item on env:, this also works for variables the agent created with an
+    empty value, which Windows PowerShell 5.1 lists but reports as not found.
+#>
+function Set-ProcessEnvironmentVariable([string] $Name, [AllowEmptyString()][AllowNull()][string] $Value) {
+    if ([string]::IsNullOrEmpty($Value)) {
+        # A real null deletes the variable. PowerShell would pass $null as '' and newer .NET versions
+        # keep a variable that is set to '' (Windows PowerShell deletes it).
+        [Environment]::SetEnvironmentVariable($Name, [System.Management.Automation.Language.NullString]::Value, [EnvironmentVariableTarget]::Process)
+    }
+    else {
+        [Environment]::SetEnvironmentVariable($Name, $Value, [EnvironmentVariableTarget]::Process)
+    }
+}
+
 function Remove-RefPrefix([string] $ref) {
     if ($ref -like 'refs/heads/*') { return $ref.Substring(11) }
     if ($ref -like 'refs/tags/*') { return $ref.Substring(10) }
@@ -384,4 +401,4 @@ function Get-AlGoAdoEnvironmentName([string] $Value = $env:ALGO_ENVIRONMENTS) {
 }
 
 Export-ModuleMember -Function Get-AlGoGitHubEnvironment, New-AlGoEventPayload, ConvertTo-AdoLogLine, Read-GitHubFileCommand, `
-    Format-AdoSetVariable, Test-SecretVariableName, ConvertTo-AdoBuildMatrix, ConvertTo-GitHubEventName, Get-EnvValue, Get-ActionInputDefault, Get-AlGoAdoEnvironmentName
+    Format-AdoSetVariable, Test-SecretVariableName, ConvertTo-AdoBuildMatrix, ConvertTo-GitHubEventName, Get-EnvValue, Get-ActionInputDefault, Get-AlGoAdoEnvironmentName, Set-ProcessEnvironmentVariable

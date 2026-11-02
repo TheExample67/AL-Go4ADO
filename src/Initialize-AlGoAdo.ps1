@@ -41,12 +41,17 @@ if (`$env:ALGO_ADO -eq 'true' -and `$env:ALGO_ADO_SRC) { . (Join-Path `$env:ALGO
 "@
 
 function Add-AlGoAdoHook([string] $actionsPath) {
-    $helper = Join-Path $actionsPath 'AL-Go-Helper.ps1'
-    if (-not (Test-Path $helper)) { throw "AL-Go-Helper.ps1 not found in $actionsPath - is this an AL-Go actions folder?" }
-    $content = [System.IO.File]::ReadAllText($helper)
-    if (-not $content.Contains($hookMarker)) {
-        [System.IO.File]::AppendAllText($helper, $hook, (New-Object System.Text.UTF8Encoding($true)))
-        Write-Host "Added AL-Go4ADO hook to $helper"
+    if (-not (Test-Path (Join-Path $actionsPath 'AL-Go-Helper.ps1'))) { throw "AL-Go-Helper.ps1 not found in $actionsPath - is this an AL-Go actions folder?" }
+    # AL-Go-TestRepoHelper.ps1 is dot-sourced after AL-Go-Helper.ps1 by WorkflowInitialize and redefines
+    # TestRunnerPrerequisites, so it gets the hook as well (loading the overrides twice is harmless)
+    foreach ($file in @('AL-Go-Helper.ps1', 'AL-Go-TestRepoHelper.ps1')) {
+        $helper = Join-Path $actionsPath $file
+        if (-not (Test-Path $helper)) { continue }
+        $content = [System.IO.File]::ReadAllText($helper)
+        if (-not $content.Contains($hookMarker)) {
+            [System.IO.File]::AppendAllText($helper, $hook, (New-Object System.Text.UTF8Encoding($true)))
+            Write-Host "Added AL-Go4ADO hook to $helper"
+        }
     }
 }
 
