@@ -139,3 +139,9 @@ AL-Go sends telemetry to Microsoft by default (upstream behavior). To disable it
 * Delivery (`Deliver` to NuGet/Storage/AppSource) and Power Platform build are on the roadmap (see docs/PLAN.md).
 * Re-running only failed jobs re-publishes artifacts with existing names and fails; re-run the whole pipeline.
 * Draft releases do not exist in Azure DevOps.
+
+## License
+
+[MIT](LICENSE). Parts are derived from [AL-Go for GitHub](https://github.com/microsoft/AL-Go)
+(MIT, © Microsoft Corporation), see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+AL-Go4ADO is not affiliated with or endorsed by Microsoft.
